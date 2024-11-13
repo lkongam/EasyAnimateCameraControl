@@ -24,32 +24,25 @@ import torch
 import torch.nn.functional as F
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.attention import BasicTransformerBlock
-from diffusers.models.embeddings import (PatchEmbed, PixArtAlphaTextProjection,
-                                         TimestepEmbedding, Timesteps,
-                                         get_2d_sincos_pos_embed)
+from diffusers.models.embeddings import PatchEmbed, PixArtAlphaTextProjection, TimestepEmbedding, Timesteps, get_2d_sincos_pos_embed
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNorm, AdaLayerNormContinuous
-from diffusers.utils import (USE_PEFT_BACKEND, BaseOutput, is_torch_version,
-                             logging)
+from diffusers.utils import USE_PEFT_BACKEND, BaseOutput, is_torch_version, logging
 from diffusers.utils.torch_utils import maybe_allow_in_graph
 from einops import rearrange
 from torch import nn
 
-from .attention import (EasyAnimateDiTBlock, HunyuanDiTBlock,
-                        SelfAttentionTemporalTransformerBlock,
-                        TemporalTransformerBlock, zero_module)
+from .attention import EasyAnimateDiTBlock, HunyuanDiTBlock, SelfAttentionTemporalTransformerBlock, TemporalTransformerBlock, zero_module
 from .embeddings import HunyuanCombinedTimestepTextSizeStyleEmbedding, TimePositionalEncoding
 from .norm import AdaLayerNormSingle
-from .patch import (CasualPatchEmbed3D, PatchEmbed3D, PatchEmbedF3D,
-                    TemporalUpsampler3D, UnPatch1D)
+from .patch import CasualPatchEmbed3D, PatchEmbed3D, PatchEmbedF3D, TemporalUpsampler3D, UnPatch1D
 from .resampler import Resampler
 
 try:
     from diffusers.models.embeddings import PixArtAlphaTextProjection
 except:
-    from diffusers.models.embeddings import \
-        CaptionProjection as PixArtAlphaTextProjection
+    from diffusers.models.embeddings import CaptionProjection as PixArtAlphaTextProjection
 
 
 class CLIPProjection(nn.Module):
@@ -65,13 +58,14 @@ class CLIPProjection(nn.Module):
         self.act_1 = nn.GELU(approximate="tanh")
         self.linear_2 = nn.Linear(in_features=hidden_size, out_features=hidden_size, bias=True)
         self.linear_2 = zero_module(self.linear_2)
+
     def forward(self, caption):
         hidden_states = self.linear_1(caption)
         hidden_states = self.act_1(hidden_states)
         hidden_states = self.linear_2(hidden_states)
         return hidden_states
 
-    
+
 @dataclass
 class Transformer3DModelOutput(BaseOutput):
     """
@@ -146,26 +140,21 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
         basic_block_type: str = "motionmodule",
         # enable_uvit
         enable_uvit: bool = False,
-
         # 3d patch params
         patch_3d: bool = False,
         fake_3d: bool = False,
         time_patch_size: Optional[int] = None,
-
         casual_3d: bool = False,
         casual_3d_upsampler_index: Optional[list] = None,
-
         # motion module kwargs
-        motion_module_type = "VanillaGrid",
-        motion_module_kwargs = None,
-        motion_module_kwargs_odd = None,
-        motion_module_kwargs_even = None,
-
+        motion_module_type="VanillaGrid",
+        motion_module_kwargs=None,
+        motion_module_kwargs_odd=None,
+        motion_module_kwargs_even=None,
         # time position encoding
-        time_position_encoding_before_transformer = False,
-
-        qk_norm = False,
-        after_norm = False,
+        time_position_encoding_before_transformer=False,
+        qk_norm=False,
+        after_norm=False,
         resize_inpaint_mask_directly: bool = False,
         enable_clip_in_inpaint: bool = True,
         enable_text_attention_mask: bool = True,
@@ -192,7 +181,7 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
         self.time_patch_size = self.patch_size if time_patch_size is None else time_patch_size
         interpolation_scale = self.config.sample_size // 64  # => 64 (= 512 pixart) has interpolation scale 1
         interpolation_scale = max(interpolation_scale, 1)
-        
+
         if self.casual_3d:
             self.pos_embed = CasualPatchEmbed3D(
                 height=sample_size,
@@ -336,18 +325,14 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
                     for d in range(num_layers)
                 ]
             )
-        
+
         if self.casual_3d:
             self.unpatch1d = TemporalUpsampler3D()
         elif self.patch_3d and self.fake_3d:
             self.unpatch1d = UnPatch1D(inner_dim, True)
 
         if self.enable_uvit:
-            self.long_connect_fc = nn.ModuleList(
-                [
-                    nn.Linear(inner_dim, inner_dim, True) for d in range(13)
-                ]
-            )
+            self.long_connect_fc = nn.ModuleList([nn.Linear(inner_dim, inner_dim, True) for d in range(13)])
             for index in range(13):
                 self.long_connect_fc[index] = zero_module(self.long_connect_fc[index])
 
@@ -385,10 +370,10 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
                 self.clip_projection = CLIPProjection(in_features=768, hidden_size=inner_dim * 8)
 
         self.gradient_checkpointing = False
-        
+
         self.time_position_encoding_before_transformer = time_position_encoding_before_transformer
         if self.time_position_encoding_before_transformer:
-            self.t_pos = TimePositionalEncoding(max_len = 4096, d_model = inner_dim)
+            self.t_pos = TimePositionalEncoding(max_len=4096, d_model=inner_dim)
 
     def _set_gradient_checkpointing(self, module, value=False):
         if hasattr(module, "gradient_checkpointing"):
@@ -479,7 +464,11 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
             hidden_states = torch.concat([hidden_states, control_latents], 1)
         # 1. Input
         if self.casual_3d:
-            video_length, height, width = (hidden_states.shape[-3] - 1) // self.time_patch_size + 1, hidden_states.shape[-2] // self.patch_size, hidden_states.shape[-1] // self.patch_size
+            video_length, height, width = (
+                (hidden_states.shape[-3] - 1) // self.time_patch_size + 1,
+                hidden_states.shape[-2] // self.patch_size,
+                hidden_states.shape[-1] // self.patch_size,
+            )
         elif self.patch_3d:
             video_length, height, width = hidden_states.shape[-3] // self.time_patch_size, hidden_states.shape[-2] // self.patch_size, hidden_states.shape[-1] // self.patch_size
         else:
@@ -489,13 +478,9 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
         hidden_states = self.pos_embed(hidden_states)
         if self.adaln_single is not None:
             if self.use_additional_conditions and added_cond_kwargs is None:
-                raise ValueError(
-                    "`added_cond_kwargs` cannot be None when using additional conditions for `adaln_single`."
-                )
+                raise ValueError("`added_cond_kwargs` cannot be None when using additional conditions for `adaln_single`.")
             batch_size = hidden_states.shape[0] // video_length
-            timestep, embedded_timestep = self.adaln_single(
-                timestep, added_cond_kwargs, batch_size=batch_size, hidden_dtype=hidden_states.dtype
-            )
+            timestep, embedded_timestep = self.adaln_single(timestep, added_cond_kwargs, batch_size=batch_size, hidden_dtype=hidden_states.dtype)
         hidden_states = rearrange(hidden_states, "(b f) (h w) c -> b c f h w", f=video_length, h=height, w=width)
 
         # hidden_states
@@ -503,7 +488,7 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
         if self.time_position_encoding_before_transformer:
             hidden_states = self.t_pos(hidden_states)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
-        
+
         # 2. Blocks
         if self.caption_projection is not None:
             batch_size = hidden_states.shape[0]
@@ -515,7 +500,7 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
             clip_encoder_hidden_states = self.clip_projection(clip_encoder_hidden_states)
             clip_encoder_hidden_states = clip_encoder_hidden_states.view(batch_size, -1, hidden_states.shape[-1])
 
-            encoder_hidden_states = torch.cat([encoder_hidden_states, clip_encoder_hidden_states], dim = 1)
+            encoder_hidden_states = torch.cat([encoder_hidden_states, clip_encoder_hidden_states], dim=1)
 
         skips = []
         skip_index = 0
@@ -565,8 +550,8 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
             else:
                 kwargs = {
                     "basic": {},
-                    "motionmodule": {"num_frames":video_length, "height":height, "width":width},
-                    "global_motionmodule": {"num_frames":video_length, "height":height, "width":width},
+                    "motionmodule": {"num_frames": video_length, "height": height, "width": width},
+                    "global_motionmodule": {"num_frames": video_length, "height": height, "width": width},
                     "selfattentiontemporal": {},
                 }[self.basic_block_type]
                 hidden_states = block(
@@ -577,7 +562,7 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
                     timestep=timestep,
                     cross_attention_kwargs=cross_attention_kwargs,
                     class_labels=class_labels,
-                    **kwargs
+                    **kwargs,
                 )
 
             if self.enable_uvit:
@@ -591,9 +576,7 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
 
         # 3. Output
         if self.config.norm_type != "ada_norm_single":
-            conditioning = self.transformer_blocks[0].norm1.emb(
-                timestep, class_labels, hidden_dtype=hidden_states.dtype
-            )
+            conditioning = self.transformer_blocks[0].norm1.emb(timestep, class_labels, hidden_dtype=hidden_states.dtype)
             shift, scale = self.proj_out_1(F.silu(conditioning)).chunk(2, dim=1)
             hidden_states = self.norm_out(hidden_states) * (1 + scale[:, None]) + shift[:, None]
             hidden_states = self.proj_out_2(hidden_states)
@@ -610,26 +593,16 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
             height = width = int(hidden_states.shape[1] ** 0.5)
         if self.patch_3d:
             if self.fake_3d:
-                hidden_states = hidden_states.reshape(
-                    shape=(-1, video_length * self.patch_size, height, width, self.patch_size, self.patch_size, self.out_channels)
-                )
+                hidden_states = hidden_states.reshape(shape=(-1, video_length * self.patch_size, height, width, self.patch_size, self.patch_size, self.out_channels))
                 hidden_states = torch.einsum("nfhwpqc->ncfhpwq", hidden_states)
             else:
-                hidden_states = hidden_states.reshape(
-                    shape=(-1, video_length, height, width, self.time_patch_size, self.patch_size, self.patch_size, self.out_channels)
-                )
+                hidden_states = hidden_states.reshape(shape=(-1, video_length, height, width, self.time_patch_size, self.patch_size, self.patch_size, self.out_channels))
                 hidden_states = torch.einsum("nfhwopqc->ncfohpwq", hidden_states)
-            output = hidden_states.reshape(
-                shape=(-1, self.out_channels, video_length * self.time_patch_size, height * self.patch_size, width * self.patch_size)
-            )
+            output = hidden_states.reshape(shape=(-1, self.out_channels, video_length * self.time_patch_size, height * self.patch_size, width * self.patch_size))
         else:
-            hidden_states = hidden_states.reshape(
-                shape=(-1, video_length, height, width, self.patch_size, self.patch_size, self.out_channels)
-            )
+            hidden_states = hidden_states.reshape(shape=(-1, video_length, height, width, self.patch_size, self.patch_size, self.out_channels))
             hidden_states = torch.einsum("nfhwpqc->ncfhpwq", hidden_states)
-            output = hidden_states.reshape(
-                shape=(-1, self.out_channels, video_length, height * self.patch_size, width * self.patch_size)
-            )
+            output = hidden_states.reshape(shape=(-1, self.out_channels, video_length, height * self.patch_size, width * self.patch_size))
 
         if not return_dict:
             return (output,)
@@ -649,19 +622,21 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
             config = json.load(f)
 
         from diffusers.utils import WEIGHTS_NAME
+
         model = cls.from_config(config, **transformer_additional_kwargs)
         model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
         model_file_safetensors = model_file.replace(".bin", ".safetensors")
         if os.path.exists(model_file_safetensors):
             from safetensors.torch import load_file, safe_open
+
             state_dict = load_file(model_file_safetensors)
         else:
             if not os.path.isfile(model_file):
                 raise RuntimeError(f"{model_file} does not exist")
             state_dict = torch.load(model_file, map_location="cpu")
-        
+
         if model.state_dict()['pos_embed.proj.weight'].size() != state_dict['pos_embed.proj.weight'].size():
-            new_shape   = model.state_dict()['pos_embed.proj.weight'].size()
+            new_shape = model.state_dict()['pos_embed.proj.weight'].size()
             if len(new_shape) == 5:
                 state_dict['pos_embed.proj.weight'] = state_dict['pos_embed.proj.weight'].unsqueeze(2).expand(new_shape).clone()
                 state_dict['pos_embed.proj.weight'][:, :, :-1] = 0
@@ -669,16 +644,16 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
                 model.state_dict()['pos_embed.proj.weight'][:, :4, :, :] = state_dict['pos_embed.proj.weight']
                 model.state_dict()['pos_embed.proj.weight'][:, 4:, :, :] = 0
                 state_dict['pos_embed.proj.weight'] = model.state_dict()['pos_embed.proj.weight']
-                
+
         if model.state_dict()['proj_out.weight'].size() != state_dict['proj_out.weight'].size():
-            new_shape   = model.state_dict()['proj_out.weight'].size()
+            new_shape = model.state_dict()['proj_out.weight'].size()
             state_dict['proj_out.weight'] = torch.tile(state_dict['proj_out.weight'], [patch_size, 1])
 
         if model.state_dict()['proj_out.bias'].size() != state_dict['proj_out.bias'].size():
-            new_shape   = model.state_dict()['proj_out.bias'].size()
+            new_shape = model.state_dict()['proj_out.bias'].size()
             state_dict['proj_out.bias'] = torch.tile(state_dict['proj_out.bias'], [patch_size])
 
-        tmp_state_dict = {} 
+        tmp_state_dict = {}
         for key in state_dict:
             if key in model.state_dict().keys() and model.state_dict()[key].size() == state_dict[key].size():
                 tmp_state_dict[key] = state_dict[key]
@@ -688,11 +663,12 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
 
         m, u = model.load_state_dict(state_dict, strict=False)
         print(f"### missing keys: {len(m)}; \n### unexpected keys: {len(u)};")
-        
+
         params = [p.numel() if "attn_temporal." in n else 0 for n, p in model.named_parameters()]
         print(f"### Attn temporal Parameters: {sum(params) / 1e6} M")
-        
+
         return model
+
 
 class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
     """
@@ -735,6 +711,7 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
         text_len_t5 (`int`, *optional*):
             The length of the T5 text embedding.
     """
+
     _supports_gradient_checkpointing = True
 
     @register_to_config
@@ -745,7 +722,6 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
         in_channels: Optional[int] = None,
         out_channels: Optional[int] = None,
         patch_size: Optional[int] = None,
-        
         n_query=16,
         projection_dim=768,
         activation_fn: str = "gelu-approximate",
@@ -760,13 +736,11 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
         pooled_projection_dim: int = 1024,
         text_len: int = 77,
         text_len_t5: int = 256,
-    
         # block type
         basic_block_type: str = "basic",
-
-        time_position_encoding = False,
-        time_position_encoding_type: str = "2d_rope", 
-        after_norm = False,
+        time_position_encoding=False,
+        time_position_encoding_type: str = "2d_rope",
+        after_norm=False,
         resize_inpaint_mask_directly: bool = False,
         enable_clip_in_inpaint: bool = True,
         enable_text_attention_mask: bool = True,
@@ -790,9 +764,7 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
             act_fn="silu_fp32",
         )
 
-        self.text_embedding_padding = nn.Parameter(
-            torch.randn(text_len + text_len_t5, cross_attention_dim, dtype=torch.float32)
-        )
+        self.text_embedding_padding = nn.Parameter(torch.randn(text_len + text_len_t5, cross_attention_dim, dtype=torch.float32))
 
         self.pos_embed = PatchEmbed(
             height=sample_size,
@@ -868,14 +840,12 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
                     for layer in range(num_layers)
                 ]
             )
-            
+
         self.n_query = n_query
         if self.enable_inpaint and enable_clip_in_inpaint:
-            self.clip_padding = nn.Parameter(
-                torch.randn((self.n_query, cross_attention_dim)) * 0.02
-            )
+            self.clip_padding = nn.Parameter(torch.randn((self.n_query, cross_attention_dim)) * 0.02)
             self.clip_projection = Resampler(
-                int(math.sqrt(n_query)), 
+                int(math.sqrt(n_query)),
                 embed_dim=cross_attention_dim,
                 num_heads=self.config.num_attention_heads,
                 kv_dim=projection_dim,
@@ -889,7 +859,7 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
         self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
 
         self.gradient_checkpointing = False
-    
+
     def _set_gradient_checkpointing(self, module, value=False):
         if hasattr(module, "gradient_checkpointing"):
             module.gradient_checkpointing = value
@@ -907,8 +877,8 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
         image_rotary_emb=None,
         inpaint_latents=None,
         control_latents: torch.Tensor = None,
-        clip_encoder_hidden_states: Optional[torch.Tensor]=None,
-        clip_attention_mask: Optional[torch.Tensor]=None,
+        clip_encoder_hidden_states: Optional[torch.Tensor] = None,
+        clip_attention_mask: Optional[torch.Tensor] = None,
         return_dict=True,
     ):
         """
@@ -950,16 +920,12 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
         hidden_states = self.pos_embed(hidden_states)
         hidden_states = rearrange(hidden_states, "(b f) (h w) c -> b c f h w", f=video_length, h=height, w=width)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
-            
-        temb = self.time_extra_emb(
-            timestep, encoder_hidden_states_t5, image_meta_size, style, hidden_dtype=timestep.dtype
-        )  # [B, D]
+
+        temb = self.time_extra_emb(timestep, encoder_hidden_states_t5, image_meta_size, style, hidden_dtype=timestep.dtype)  # [B, D]
 
         # text projection
         batch_size, sequence_length, _ = encoder_hidden_states_t5.shape
-        encoder_hidden_states_t5 = self.text_embedder(
-            encoder_hidden_states_t5.view(-1, encoder_hidden_states_t5.shape[-1])
-        )
+        encoder_hidden_states_t5 = self.text_embedder(encoder_hidden_states_t5.view(-1, encoder_hidden_states_t5.shape[-1]))
         encoder_hidden_states_t5 = encoder_hidden_states_t5.view(batch_size, sequence_length, -1)
 
         encoder_hidden_states = torch.cat([encoder_hidden_states, encoder_hidden_states_t5], dim=1)
@@ -1010,17 +976,12 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
                     )
                 else:
                     kwargs = {
-                        "kvcompression_basic": {"num_frames":video_length, "height":height, "width":width, "clip_encoder_hidden_states":clip_encoder_hidden_states},
-                        "basic": {"num_frames":video_length, "height":height, "width":width, "clip_encoder_hidden_states":clip_encoder_hidden_states},
-                        "hybrid_attention": {"num_frames":video_length, "height":height, "width":width, "clip_encoder_hidden_states":clip_encoder_hidden_states},
+                        "kvcompression_basic": {"num_frames": video_length, "height": height, "width": width, "clip_encoder_hidden_states": clip_encoder_hidden_states},
+                        "basic": {"num_frames": video_length, "height": height, "width": width, "clip_encoder_hidden_states": clip_encoder_hidden_states},
+                        "hybrid_attention": {"num_frames": video_length, "height": height, "width": width, "clip_encoder_hidden_states": clip_encoder_hidden_states},
                     }[self.basic_block_type]
                     hidden_states = block(
-                        hidden_states,
-                        temb=temb,
-                        encoder_hidden_states=encoder_hidden_states,
-                        image_rotary_emb=image_rotary_emb,  
-                        skip=skip,                  
-                        **kwargs
+                        hidden_states, temb=temb, encoder_hidden_states=encoder_hidden_states, image_rotary_emb=image_rotary_emb, skip=skip, **kwargs
                     )  # (N, L, D)
             else:
                 if self.training and self.gradient_checkpointing:
@@ -1033,35 +994,35 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
                                 return module(*inputs)
 
                         return custom_forward
-                    
+
                     ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
                     args = {
-                        "kvcompression_basic": [None, video_length, height, width, clip_encoder_hidden_states, True if layer==0 else False],
-                        "basic": [None, video_length, height, width, clip_encoder_hidden_states, True if layer==0 else False],
-                        "hybrid_attention": [None, video_length, height, width, clip_encoder_hidden_states, True if layer==0 else False],
+                        "kvcompression_basic": [None, video_length, height, width, clip_encoder_hidden_states, True if layer == 0 else False],
+                        "basic": [None, video_length, height, width, clip_encoder_hidden_states, True if layer == 0 else False],
+                        "hybrid_attention": [None, video_length, height, width, clip_encoder_hidden_states, True if layer == 0 else False],
                     }[self.basic_block_type]
                     hidden_states = torch.utils.checkpoint.checkpoint(
                         create_custom_forward(block),
                         hidden_states,
                         encoder_hidden_states,
                         temb,
-                        image_rotary_emb, 
+                        image_rotary_emb,
                         *args,
                         **ckpt_kwargs,
                     )
                 else:
                     kwargs = {
-                        "kvcompression_basic": {"num_frames":video_length, "height":height, "width":width, "clip_encoder_hidden_states":clip_encoder_hidden_states},
-                        "basic": {"num_frames":video_length, "height":height, "width":width, "clip_encoder_hidden_states":clip_encoder_hidden_states},
-                        "hybrid_attention": {"num_frames":video_length, "height":height, "width":width, "clip_encoder_hidden_states":clip_encoder_hidden_states},
+                        "kvcompression_basic": {"num_frames": video_length, "height": height, "width": width, "clip_encoder_hidden_states": clip_encoder_hidden_states},
+                        "basic": {"num_frames": video_length, "height": height, "width": width, "clip_encoder_hidden_states": clip_encoder_hidden_states},
+                        "hybrid_attention": {"num_frames": video_length, "height": height, "width": width, "clip_encoder_hidden_states": clip_encoder_hidden_states},
                     }[self.basic_block_type]
                     hidden_states = block(
                         hidden_states,
                         temb=temb,
                         encoder_hidden_states=encoder_hidden_states,
-                        image_rotary_emb=image_rotary_emb,  
-                        disable_image_rotary_emb_in_attn1=True if layer==0 else False,
-                        **kwargs
+                        image_rotary_emb=image_rotary_emb,
+                        disable_image_rotary_emb_in_attn1=True if layer == 0 else False,
+                        **kwargs,
                     )  # (N, L, D)
 
             if layer < (self.config.num_layers // 2 - 1):
@@ -1072,14 +1033,10 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
         hidden_states = self.proj_out(hidden_states)
         # (N, L, patch_size ** 2 * out_channels)
 
-        hidden_states = hidden_states.reshape(
-            shape=(hidden_states.shape[0], video_length, height, width, patch_size, patch_size, self.out_channels)
-        )
+        hidden_states = hidden_states.reshape(shape=(hidden_states.shape[0], video_length, height, width, patch_size, patch_size, self.out_channels))
         hidden_states = torch.einsum("nfhwpqc->ncfhpwq", hidden_states)
-        output = hidden_states.reshape(
-            shape=(hidden_states.shape[0], self.out_channels, video_length, height * patch_size, width * patch_size)
-        )
-        
+        output = hidden_states.reshape(shape=(hidden_states.shape[0], self.out_channels, video_length, height * patch_size, width * patch_size))
+
         if not return_dict:
             return (output,)
         return Transformer2DModelOutput(sample=output)
@@ -1097,48 +1054,50 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
             config = json.load(f)
 
         from diffusers.utils import WEIGHTS_NAME
+
         model = cls.from_config(config, **transformer_additional_kwargs)
         model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
         model_file_safetensors = model_file.replace(".bin", ".safetensors")
         if os.path.exists(model_file_safetensors):
             from safetensors.torch import load_file, safe_open
+
             state_dict = load_file(model_file_safetensors)
         else:
             if not os.path.isfile(model_file):
                 raise RuntimeError(f"{model_file} does not exist")
             state_dict = torch.load(model_file, map_location="cpu")
-        
+
         if model.state_dict()['pos_embed.proj.weight'].size() != state_dict['pos_embed.proj.weight'].size():
-            new_shape   = model.state_dict()['pos_embed.proj.weight'].size()
+            new_shape = model.state_dict()['pos_embed.proj.weight'].size()
             if len(new_shape) == 5:
                 state_dict['pos_embed.proj.weight'] = state_dict['pos_embed.proj.weight'].unsqueeze(2).expand(new_shape).clone()
                 state_dict['pos_embed.proj.weight'][:, :, :-1] = 0
             else:
                 if model.state_dict()['pos_embed.proj.weight'].size()[1] > state_dict['pos_embed.proj.weight'].size()[1]:
-                    model.state_dict()['pos_embed.proj.weight'][:, :state_dict['pos_embed.proj.weight'].size()[1], :, :] = state_dict['pos_embed.proj.weight']
-                    model.state_dict()['pos_embed.proj.weight'][:, state_dict['pos_embed.proj.weight'].size()[1]:, :, :] = 0
+                    model.state_dict()['pos_embed.proj.weight'][:, : state_dict['pos_embed.proj.weight'].size()[1], :, :] = state_dict['pos_embed.proj.weight']
+                    model.state_dict()['pos_embed.proj.weight'][:, state_dict['pos_embed.proj.weight'].size()[1] :, :, :] = 0
                     state_dict['pos_embed.proj.weight'] = model.state_dict()['pos_embed.proj.weight']
                 else:
-                    model.state_dict()['pos_embed.proj.weight'][:, :, :, :] = state_dict['pos_embed.proj.weight'][:, :model.state_dict()['pos_embed.proj.weight'].size()[1], :, :]
+                    model.state_dict()['pos_embed.proj.weight'][:, :, :, :] = state_dict['pos_embed.proj.weight'][:, : model.state_dict()['pos_embed.proj.weight'].size()[1], :, :]
                     state_dict['pos_embed.proj.weight'] = model.state_dict()['pos_embed.proj.weight']
 
         if model.state_dict()['proj_out.weight'].size() != state_dict['proj_out.weight'].size():
             if model.state_dict()['proj_out.weight'].size()[0] > state_dict['proj_out.weight'].size()[0]:
-                model.state_dict()['proj_out.weight'][:state_dict['proj_out.weight'].size()[0], :] = state_dict['proj_out.weight']
+                model.state_dict()['proj_out.weight'][: state_dict['proj_out.weight'].size()[0], :] = state_dict['proj_out.weight']
                 state_dict['proj_out.weight'] = model.state_dict()['proj_out.weight']
             else:
-                model.state_dict()['proj_out.weight'][:, :] = state_dict['proj_out.weight'][:model.state_dict()['proj_out.weight'].size()[0], :]
+                model.state_dict()['proj_out.weight'][:, :] = state_dict['proj_out.weight'][: model.state_dict()['proj_out.weight'].size()[0], :]
                 state_dict['proj_out.weight'] = model.state_dict()['proj_out.weight']
 
         if model.state_dict()['proj_out.bias'].size() != state_dict['proj_out.bias'].size():
             if model.state_dict()['proj_out.bias'].size()[0] > state_dict['proj_out.bias'].size()[0]:
-                model.state_dict()['proj_out.bias'][:state_dict['proj_out.bias'].size()[0]] = state_dict['proj_out.bias']
+                model.state_dict()['proj_out.bias'][: state_dict['proj_out.bias'].size()[0]] = state_dict['proj_out.bias']
                 state_dict['proj_out.bias'] = model.state_dict()['proj_out.bias']
             else:
-                model.state_dict()['proj_out.bias'][:, :] = state_dict['proj_out.bias'][:model.state_dict()['proj_out.bias'].size()[0], :]
+                model.state_dict()['proj_out.bias'][:, :] = state_dict['proj_out.bias'][: model.state_dict()['proj_out.bias'].size()[0], :]
                 state_dict['proj_out.bias'] = model.state_dict()['proj_out.bias']
 
-        tmp_state_dict = {} 
+        tmp_state_dict = {}
         for key in state_dict:
             if key in model.state_dict().keys() and model.state_dict()[key].size() == state_dict[key].size():
                 tmp_state_dict[key] = state_dict[key]
@@ -1149,14 +1108,15 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
         m, u = model.load_state_dict(state_dict, strict=False)
         print(f"### missing keys: {len(m)}; \n### unexpected keys: {len(u)};")
         print(m)
-        
+
         params = [p.numel() if "mamba" in n else 0 for n, p in model.named_parameters()]
         print(f"### Mamba Parameters: {sum(params) / 1e6} M")
 
         params = [p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()]
         print(f"### attn1 Parameters: {sum(params) / 1e6} M")
-        
+
         return model
+
 
 class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
     _supports_gradient_checkpointing = True
@@ -1173,7 +1133,6 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
         sample_height: int = 60,
         ref_channels: int = None,
         clip_channels: int = None,
-
         activation_fn: str = "gelu-approximate",
         timestep_activation_fn: str = "silu",
         freq_shift: int = 0,
@@ -1183,12 +1142,10 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
         text_embed_dim: int = 4096,
         text_embed_dim_t5: int = 4096,
         norm_eps: float = 1e-5,
-
         norm_elementwise_affine: bool = True,
         flip_sin_to_cos: bool = True,
-    
-        time_position_encoding_type: str = "3d_rope", 
-        after_norm = False,
+        time_position_encoding_type: str = "3d_rope",
+        after_norm=False,
         resize_inpaint_mask_directly: bool = False,
         enable_clip_in_inpaint: bool = True,
         enable_text_attention_mask: bool = True,
@@ -1208,16 +1165,12 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
         self.time_proj = Timesteps(self.inner_dim, flip_sin_to_cos, freq_shift)
         self.time_embedding = TimestepEmbedding(self.inner_dim, time_embed_dim, timestep_activation_fn)
 
-        self.proj = nn.Conv2d(
-            in_channels, self.inner_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=True
-        )
+        self.proj = nn.Conv2d(in_channels, self.inner_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=True)
         self.text_proj = nn.Linear(text_embed_dim, self.inner_dim)
         self.text_proj_t5 = nn.Linear(text_embed_dim_t5, self.inner_dim)
 
         if ref_channels is not None:
-            self.ref_proj = nn.Conv2d(
-                ref_channels, self.inner_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=True
-            )
+            self.ref_proj = nn.Conv2d(ref_channels, self.inner_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=True)
             ref_pos_embedding = get_2d_sincos_pos_embed(self.inner_dim, (post_patch_height, post_patch_width))
             ref_pos_embedding = torch.from_numpy(ref_pos_embedding)
             self.register_buffer("ref_pos_embedding", ref_pos_embedding, persistent=False)
@@ -1236,7 +1189,7 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
                     activation_fn=activation_fn,
                     norm_elementwise_affine=norm_elementwise_affine,
                     norm_eps=norm_eps,
-                    after_norm=after_norm
+                    after_norm=after_norm,
                 )
                 for _ in range(num_layers)
             ]
@@ -1262,13 +1215,13 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
         self,
         hidden_states,
         timestep,
-        timestep_cond = None,
+        timestep_cond=None,
         encoder_hidden_states: Optional[torch.Tensor] = None,
         text_embedding_mask: Optional[torch.Tensor] = None,
         encoder_hidden_states_t5: Optional[torch.Tensor] = None,
         text_embedding_mask_t5: Optional[torch.Tensor] = None,
-        image_meta_size = None,
-        style = None,
+        image_meta_size=None,
+        style=None,
         image_rotary_emb: Optional[torch.Tensor] = None,
         inpaint_latents: Optional[torch.Tensor] = None,
         control_latents: Optional[torch.Tensor] = None,
@@ -1310,23 +1263,22 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
             ref_pos_embedding = self.ref_pos_embedding
             ref_pos_embedding_interpolate = ref_pos_embedding.view(1, 1, self.post_patch_height, self.post_patch_width, emb_size).permute([0, 4, 1, 2, 3])
             ref_pos_embedding_interpolate = F.interpolate(
-                ref_pos_embedding_interpolate, 
-                size=[1, height // self.config.patch_size, width // self.config.patch_size], 
-                mode='trilinear', align_corners=False
+                ref_pos_embedding_interpolate, size=[1, height // self.config.patch_size, width // self.config.patch_size], mode='trilinear', align_corners=False
             )
             ref_pos_embedding_interpolate = ref_pos_embedding_interpolate.permute([0, 2, 3, 4, 1]).view(1, -1, emb_size)
             ref_latents = ref_latents + ref_pos_embedding_interpolate
-            
+
             encoder_hidden_states = ref_latents
-            
+
         if clip_encoder_hidden_states is not None:
             clip_encoder_hidden_states = self.clip_proj(clip_encoder_hidden_states)
-            
+
             encoder_hidden_states = torch.concat([clip_encoder_hidden_states, ref_latents], dim=1)
 
         # 4. Transformer blocks
         for i, block in enumerate(self.transformer_blocks):
             if self.training and self.gradient_checkpointing:
+
                 def create_custom_forward(module, return_dict=None):
                     def custom_forward(*inputs):
                         if return_dict is not None:
@@ -1355,7 +1307,7 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
 
         hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
         hidden_states = self.norm_final(hidden_states)
-        hidden_states = hidden_states[:, encoder_hidden_states.size()[1]:]
+        hidden_states = hidden_states[:, encoder_hidden_states.size()[1] :]
 
         # 5. Final block
         hidden_states = self.norm_out(hidden_states, temb=temb)
@@ -1383,6 +1335,7 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
             config = json.load(f)
 
         from diffusers.utils import WEIGHTS_NAME
+
         model = cls.from_config(config, **transformer_additional_kwargs)
         model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
         model_file_safetensors = model_file.replace(".bin", ".safetensors")
@@ -1390,9 +1343,11 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
             state_dict = torch.load(model_file, map_location="cpu")
         elif os.path.exists(model_file_safetensors):
             from safetensors.torch import load_file, safe_open
+
             state_dict = load_file(model_file_safetensors)
         else:
             from safetensors.torch import load_file, safe_open
+
             model_files_safetensors = glob.glob(os.path.join(pretrained_model_path, "*.safetensors"))
             state_dict = {}
             for model_file_safetensors in model_files_safetensors:
@@ -1401,36 +1356,309 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
                     state_dict[key] = _state_dict[key]
 
         if model.state_dict()['proj.weight'].size() != state_dict['proj.weight'].size():
-            new_shape   = model.state_dict()['proj.weight'].size()
+            new_shape = model.state_dict()['proj.weight'].size()
             if len(new_shape) == 5:
                 state_dict['proj.weight'] = state_dict['proj.weight'].unsqueeze(2).expand(new_shape).clone()
                 state_dict['proj.weight'][:, :, :-1] = 0
             else:
                 if model.state_dict()['proj.weight'].size()[1] > state_dict['proj.weight'].size()[1]:
-                    model.state_dict()['proj.weight'][:, :state_dict['proj.weight'].size()[1], :, :] = state_dict['proj.weight']
-                    model.state_dict()['proj.weight'][:, state_dict['proj.weight'].size()[1]:, :, :] = 0
+                    model.state_dict()['proj.weight'][:, : state_dict['proj.weight'].size()[1], :, :] = state_dict['proj.weight']
+                    model.state_dict()['proj.weight'][:, state_dict['proj.weight'].size()[1] :, :, :] = 0
                     state_dict['proj.weight'] = model.state_dict()['proj.weight']
                 else:
-                    model.state_dict()['proj.weight'][:, :, :, :] = state_dict['proj.weight'][:, :model.state_dict()['proj.weight'].size()[1], :, :]
+                    model.state_dict()['proj.weight'][:, :, :, :] = state_dict['proj.weight'][:, : model.state_dict()['proj.weight'].size()[1], :, :]
                     state_dict['proj.weight'] = model.state_dict()['proj.weight']
 
-        tmp_state_dict = {} 
+        tmp_state_dict = {}
         for key in state_dict:
             if key in model.state_dict().keys() and model.state_dict()[key].size() == state_dict[key].size():
                 tmp_state_dict[key] = state_dict[key]
             else:
                 print(key, "Size don't match, skip")
-                
+
         state_dict = tmp_state_dict
 
         m, u = model.load_state_dict(state_dict, strict=False)
         print(f"### missing keys: {len(m)}; \n### unexpected keys: {len(u)};")
         print(m)
-        
+
         params = [p.numel() if "." in n else 0 for n, p in model.named_parameters()]
         print(f"### All Parameters: {sum(params) / 1e6} M")
 
         params = [p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()]
         print(f"### attn1 Parameters: {sum(params) / 1e6} M")
-        
+
+        return model
+
+
+class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
+    _supports_gradient_checkpointing = True
+
+    @register_to_config
+    def __init__(
+        self,
+        num_attention_heads: int = 30,
+        attention_head_dim: int = 64,
+        in_channels: Optional[int] = None,
+        out_channels: Optional[int] = None,
+        patch_size: Optional[int] = None,
+        sample_width: int = 90,
+        sample_height: int = 60,
+        ref_channels: int = None,
+        clip_channels: int = None,
+        activation_fn: str = "gelu-approximate",
+        timestep_activation_fn: str = "silu",
+        freq_shift: int = 0,
+        num_layers: int = 30,
+        dropout: float = 0.0,
+        time_embed_dim: int = 512,
+        text_embed_dim: int = 4096,
+        text_embed_dim_t5: int = 4096,
+        norm_eps: float = 1e-5,
+        norm_elementwise_affine: bool = True,
+        flip_sin_to_cos: bool = True,
+        time_position_encoding_type: str = "3d_rope",
+        after_norm=False,
+        resize_inpaint_mask_directly: bool = False,
+        enable_clip_in_inpaint: bool = True,
+        enable_text_attention_mask: bool = True,
+        add_noise_in_inpaint_model: bool = False,
+    ):
+        super().__init__()
+        self.num_heads = num_attention_heads
+        self.inner_dim = num_attention_heads * attention_head_dim
+        self.resize_inpaint_mask_directly = resize_inpaint_mask_directly
+        self.patch_size = patch_size
+
+        post_patch_height = sample_height // patch_size
+        post_patch_width = sample_width // patch_size
+        self.post_patch_height = post_patch_height
+        self.post_patch_width = post_patch_width
+
+        self.time_proj = Timesteps(self.inner_dim, flip_sin_to_cos, freq_shift)
+        self.time_embedding = TimestepEmbedding(self.inner_dim, time_embed_dim, timestep_activation_fn)
+
+        self.proj = nn.Conv2d(in_channels, self.inner_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=True)
+        self.text_proj = nn.Linear(text_embed_dim, self.inner_dim)
+        self.text_proj_t5 = nn.Linear(text_embed_dim_t5, self.inner_dim)
+
+        if ref_channels is not None:
+            self.ref_proj = nn.Conv2d(ref_channels, self.inner_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=True)
+            ref_pos_embedding = get_2d_sincos_pos_embed(self.inner_dim, (post_patch_height, post_patch_width))
+            ref_pos_embedding = torch.from_numpy(ref_pos_embedding)
+            self.register_buffer("ref_pos_embedding", ref_pos_embedding, persistent=False)
+
+        if clip_channels is not None:
+            self.clip_proj = nn.Linear(clip_channels, self.inner_dim)
+
+        self.transformer_blocks = nn.ModuleList(
+            [
+                EasyAnimateDiTBlock(
+                    dim=self.inner_dim,
+                    num_attention_heads=num_attention_heads,
+                    attention_head_dim=attention_head_dim,
+                    time_embed_dim=time_embed_dim,
+                    dropout=dropout,
+                    activation_fn=activation_fn,
+                    norm_elementwise_affine=norm_elementwise_affine,
+                    norm_eps=norm_eps,
+                    after_norm=after_norm,
+                )
+                for _ in range(num_layers)
+            ]
+        )
+        self.norm_final = nn.LayerNorm(self.inner_dim, norm_eps, norm_elementwise_affine)
+
+        # 5. Output blocks
+        self.norm_out = AdaLayerNorm(
+            embedding_dim=time_embed_dim,
+            output_dim=2 * self.inner_dim,
+            norm_elementwise_affine=norm_elementwise_affine,
+            norm_eps=norm_eps,
+            chunk_dim=1,
+        )
+        self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * out_channels)
+
+        self.gradient_checkpointing = False
+
+    def _set_gradient_checkpointing(self, module, value=False):
+        self.gradient_checkpointing = value
+
+    def forward(
+        self,
+        hidden_states,
+        timestep,
+        timestep_cond=None,
+        encoder_hidden_states: Optional[torch.Tensor] = None,
+        text_embedding_mask: Optional[torch.Tensor] = None,
+        encoder_hidden_states_t5: Optional[torch.Tensor] = None,
+        text_embedding_mask_t5: Optional[torch.Tensor] = None,
+        image_meta_size=None,
+        style=None,
+        image_rotary_emb: Optional[torch.Tensor] = None,
+        inpaint_latents: Optional[torch.Tensor] = None,
+        control_latents: Optional[torch.Tensor] = None,
+        ref_latents: Optional[torch.Tensor] = None,
+        clip_encoder_hidden_states: Optional[torch.Tensor] = None,
+        clip_attention_mask: Optional[torch.Tensor] = None,
+        return_dict=True,
+    ):
+        batch_size, channels, video_length, height, width = hidden_states.size()
+
+        # 1. Time embedding
+        temb = self.time_proj(timestep).to(dtype=hidden_states.dtype)
+        temb = self.time_embedding(temb, timestep_cond)
+
+        # 2. Patch embedding
+        if inpaint_latents is not None:
+            hidden_states = torch.concat([hidden_states, inpaint_latents], 1)
+        if control_latents is not None:
+            hidden_states = torch.concat([hidden_states, control_latents], 1)
+
+        hidden_states = rearrange(hidden_states, "b c f h w ->(b f) c h w")
+        hidden_states = self.proj(hidden_states)
+        hidden_states = rearrange(hidden_states, "(b f) c h w -> b c f h w", f=video_length, h=height // self.patch_size, w=width // self.patch_size)
+        hidden_states = hidden_states.flatten(2).transpose(1, 2)
+
+        encoder_hidden_states = self.text_proj(encoder_hidden_states)
+        if encoder_hidden_states_t5 is not None:
+            encoder_hidden_states_t5 = self.text_proj_t5(encoder_hidden_states_t5)
+            encoder_hidden_states = torch.cat([encoder_hidden_states, encoder_hidden_states_t5], dim=1).contiguous()
+
+        if ref_latents is not None:
+            ref_batch, ref_channels, ref_video_length, ref_height, ref_width = ref_latents.shape
+            ref_latents = rearrange(ref_latents, "b c f h w ->(b f) c h w")
+            ref_latents = self.ref_proj(ref_latents)
+            ref_latents = rearrange(ref_latents, "(b f) c h w -> b c f h w", f=ref_video_length, h=ref_height // self.patch_size, w=ref_width // self.patch_size)
+            ref_latents = ref_latents.flatten(2).transpose(1, 2)
+
+            emb_size = hidden_states.size()[-1]
+            ref_pos_embedding = self.ref_pos_embedding
+            ref_pos_embedding_interpolate = ref_pos_embedding.view(1, 1, self.post_patch_height, self.post_patch_width, emb_size).permute([0, 4, 1, 2, 3])
+            ref_pos_embedding_interpolate = F.interpolate(
+                ref_pos_embedding_interpolate, size=[1, height // self.config.patch_size, width // self.config.patch_size], mode='trilinear', align_corners=False
+            )
+            ref_pos_embedding_interpolate = ref_pos_embedding_interpolate.permute([0, 2, 3, 4, 1]).view(1, -1, emb_size)
+            ref_latents = ref_latents + ref_pos_embedding_interpolate
+
+            encoder_hidden_states = ref_latents
+
+        if clip_encoder_hidden_states is not None:
+            clip_encoder_hidden_states = self.clip_proj(clip_encoder_hidden_states)
+
+            encoder_hidden_states = torch.concat([clip_encoder_hidden_states, ref_latents], dim=1)
+
+        # 4. Transformer blocks
+        for i, block in enumerate(self.transformer_blocks):
+            if self.training and self.gradient_checkpointing:
+
+                def create_custom_forward(module, return_dict=None):
+                    def custom_forward(*inputs):
+                        if return_dict is not None:
+                            return module(*inputs, return_dict=return_dict)
+                        else:
+                            return module(*inputs)
+
+                    return custom_forward
+
+                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                hidden_states, encoder_hidden_states = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(block),
+                    hidden_states,
+                    encoder_hidden_states,
+                    temb,
+                    image_rotary_emb,
+                    **ckpt_kwargs,
+                )
+            else:
+                hidden_states, encoder_hidden_states = block(
+                    hidden_states=hidden_states,
+                    encoder_hidden_states=encoder_hidden_states,
+                    temb=temb,
+                    image_rotary_emb=image_rotary_emb,
+                )
+
+        hidden_states = torch.cat([encoder_hidden_states, hidden_states], dim=1)
+        hidden_states = self.norm_final(hidden_states)
+        hidden_states = hidden_states[:, encoder_hidden_states.size()[1] :]
+
+        # 5. Final block
+        hidden_states = self.norm_out(hidden_states, temb=temb)
+        hidden_states = self.proj_out(hidden_states)
+
+        # 6. Unpatchify
+        p = self.config.patch_size
+        output = hidden_states.reshape(batch_size, video_length, height // p, width // p, channels, p, p)
+        output = output.permute(0, 4, 1, 2, 5, 3, 6).flatten(5, 6).flatten(3, 4)
+
+        if not return_dict:
+            return (output,)
+        return Transformer2DModelOutput(sample=output)
+
+    @classmethod
+    def from_pretrained_2d(cls, pretrained_model_path, subfolder=None, transformer_additional_kwargs={}):
+        if subfolder is not None:
+            pretrained_model_path = os.path.join(pretrained_model_path, subfolder)
+        print(f"loaded 3D transformer's pretrained weights from {pretrained_model_path} ...")
+
+        config_file = os.path.join(pretrained_model_path, 'config.json')
+        if not os.path.isfile(config_file):
+            raise RuntimeError(f"{config_file} does not exist")
+        with open(config_file, "r") as f:
+            config = json.load(f)
+
+        from diffusers.utils import WEIGHTS_NAME
+
+        model = cls.from_config(config, **transformer_additional_kwargs)
+        model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
+        model_file_safetensors = model_file.replace(".bin", ".safetensors")
+        if os.path.exists(model_file):
+            state_dict = torch.load(model_file, map_location="cpu")
+        elif os.path.exists(model_file_safetensors):
+            from safetensors.torch import load_file, safe_open
+
+            state_dict = load_file(model_file_safetensors)
+        else:
+            from safetensors.torch import load_file, safe_open
+
+            model_files_safetensors = glob.glob(os.path.join(pretrained_model_path, "*.safetensors"))
+            state_dict = {}
+            for model_file_safetensors in model_files_safetensors:
+                _state_dict = load_file(model_file_safetensors)
+                for key in _state_dict:
+                    state_dict[key] = _state_dict[key]
+
+        if model.state_dict()['proj.weight'].size() != state_dict['proj.weight'].size():
+            new_shape = model.state_dict()['proj.weight'].size()
+            if len(new_shape) == 5:
+                state_dict['proj.weight'] = state_dict['proj.weight'].unsqueeze(2).expand(new_shape).clone()
+                state_dict['proj.weight'][:, :, :-1] = 0
+            else:
+                if model.state_dict()['proj.weight'].size()[1] > state_dict['proj.weight'].size()[1]:
+                    model.state_dict()['proj.weight'][:, : state_dict['proj.weight'].size()[1], :, :] = state_dict['proj.weight']
+                    model.state_dict()['proj.weight'][:, state_dict['proj.weight'].size()[1] :, :, :] = 0
+                    state_dict['proj.weight'] = model.state_dict()['proj.weight']
+                else:
+                    model.state_dict()['proj.weight'][:, :, :, :] = state_dict['proj.weight'][:, : model.state_dict()['proj.weight'].size()[1], :, :]
+                    state_dict['proj.weight'] = model.state_dict()['proj.weight']
+
+        tmp_state_dict = {}
+        for key in state_dict:
+            if key in model.state_dict().keys() and model.state_dict()[key].size() == state_dict[key].size():
+                tmp_state_dict[key] = state_dict[key]
+            else:
+                print(key, "Size don't match, skip")
+
+        state_dict = tmp_state_dict
+
+        m, u = model.load_state_dict(state_dict, strict=False)
+        print(f"### missing keys: {len(m)}; \n### unexpected keys: {len(u)};")
+        print(m)
+
+        params = [p.numel() if "." in n else 0 for n, p in model.named_parameters()]
+        print(f"### All Parameters: {sum(params) / 1e6} M")
+
+        params = [p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()]
+        print(f"### attn1 Parameters: {sum(params) / 1e6} M")
+
         return model
