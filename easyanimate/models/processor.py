@@ -36,9 +36,7 @@ class HunyuanAttnProcessor2_0:
             batch_size, channel, height, width = hidden_states.shape
             hidden_states = hidden_states.view(batch_size, channel, height * width).transpose(1, 2)
 
-        batch_size, sequence_length, _ = (
-            hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
-        )
+        batch_size, sequence_length, _ = hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
 
         if attention_mask is not None:
             attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
@@ -80,9 +78,7 @@ class HunyuanAttnProcessor2_0:
 
         # the output of sdp = (batch, num_heads, seq_len, head_dim)
         # TODO: add support for attn.scale when we move to Torch 2.1
-        hidden_states = F.scaled_dot_product_attention(
-            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-        )
+        hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False)
 
         hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
         hidden_states = hidden_states.to(query.dtype)
@@ -101,6 +97,7 @@ class HunyuanAttnProcessor2_0:
         hidden_states = hidden_states / attn.rescale_output_factor
 
         return hidden_states
+
 
 class LazyKVCompressionProcessor2_0:
     r"""
@@ -130,9 +127,7 @@ class LazyKVCompressionProcessor2_0:
         batch_size, channel, num_frames, height, width = hidden_states.shape
         hidden_states = rearrange(hidden_states, "b c f h w -> b (f h w) c", f=num_frames, h=height, w=width)
 
-        batch_size, sequence_length, _ = (
-            hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
-        )
+        batch_size, sequence_length, _ = hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
 
         if attention_mask is not None:
             attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
@@ -183,7 +178,7 @@ class LazyKVCompressionProcessor2_0:
             )
             compression_image_rotary_emb = (
                 F.interpolate(compression_image_rotary_emb[0], size=key_shape[-2:], mode='bilinear'),
-                F.interpolate(compression_image_rotary_emb[1], size=key_shape[-2:], mode='bilinear')
+                F.interpolate(compression_image_rotary_emb[1], size=key_shape[-2:], mode='bilinear'),
             )
             compression_image_rotary_emb = (
                 rearrange(compression_image_rotary_emb[0], "f c h w -> (f h w) c"),
@@ -196,9 +191,7 @@ class LazyKVCompressionProcessor2_0:
 
         # the output of sdp = (batch, num_heads, seq_len, head_dim)
         # TODO: add support for attn.scale when we move to Torch 2.1
-        hidden_states = F.scaled_dot_product_attention(
-            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-        )
+        hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False)
 
         hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
         hidden_states = hidden_states.to(query.dtype)
@@ -215,6 +208,7 @@ class LazyKVCompressionProcessor2_0:
 
         return hidden_states
 
+
 class EasyAnimateAttnProcessor2_0:
     def __init__(self):
         pass
@@ -230,9 +224,7 @@ class EasyAnimateAttnProcessor2_0:
     ) -> torch.Tensor:
         text_seq_length = encoder_hidden_states.size(1)
 
-        batch_size, sequence_length, _ = (
-            hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
-        )
+        batch_size, sequence_length, _ = hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
 
         if attention_mask is not None:
             attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
@@ -256,12 +248,12 @@ class EasyAnimateAttnProcessor2_0:
             query = attn.norm_q(query)
         if attn.norm_k is not None:
             key = attn.norm_k(key)
-        
+
         if attn2 is not None:
             query_txt = attn2.to_q(encoder_hidden_states)
             key_txt = attn2.to_k(encoder_hidden_states)
             value_txt = attn2.to_v(encoder_hidden_states)
-            
+
             inner_dim = key_txt.shape[-1]
             head_dim = inner_dim // attn.heads
 
@@ -284,9 +276,7 @@ class EasyAnimateAttnProcessor2_0:
             if not attn.is_cross_attention:
                 key[:, :, text_seq_length:] = apply_rotary_emb(key[:, :, text_seq_length:], image_rotary_emb)
 
-        hidden_states = F.scaled_dot_product_attention(
-            query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-        )
+        hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False)
 
         hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, attn.heads * head_dim)
 
@@ -296,13 +286,9 @@ class EasyAnimateAttnProcessor2_0:
             # dropout
             hidden_states = attn.to_out[1](hidden_states)
 
-            encoder_hidden_states, hidden_states = hidden_states.split(
-                [text_seq_length, hidden_states.size(1) - text_seq_length], dim=1
-            )
+            encoder_hidden_states, hidden_states = hidden_states.split([text_seq_length, hidden_states.size(1) - text_seq_length], dim=1)
         else:
-            encoder_hidden_states, hidden_states = hidden_states.split(
-                [text_seq_length, hidden_states.size(1) - text_seq_length], dim=1
-            )
+            encoder_hidden_states, hidden_states = hidden_states.split([text_seq_length, hidden_states.size(1) - text_seq_length], dim=1)
             # linear proj
             hidden_states = attn.to_out[0](hidden_states)
             encoder_hidden_states = attn2.to_out[0](encoder_hidden_states)
