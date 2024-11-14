@@ -22,7 +22,7 @@ from easyanimate.utils.fp8_optimization import convert_weight_dtype_wrapper
 #
 # sequential_cpu_offload means that each layer of the model will be moved to the CPU after use,
 # resulting in slower speeds but saving a large amount of GPU memory.
-GPU_memory_mode = "model_cpu_offload"
+GPU_memory_mode = "model_cpu_offload_and_qfloat8"
 
 # Config and model path
 config_path = "config/easyanimate_video_v5_magvit_camera_control.yaml"
@@ -46,7 +46,7 @@ sample_size = [384, 672]
 # In EasyAnimateV2, V3, V4, the video_length of video is 1 ~ 144.
 # In EasyAnimateV5, the video_length of video is 1 ~ 49.
 # If u want to generate a image, please set the video_length = 1.
-video_length = 49
+video_length = 37
 fps = 8
 
 # Use torch.float16 if GPU does not support torch.bfloat16
@@ -60,13 +60,13 @@ denoise_strength = 0.70
 # EasyAnimateV4 and V5 support English and Chinese.
 # 使用更长的neg prompt如"模糊，突变，变形，失真，画面暗，文本字幕，画面固定，连环画，漫画，线稿，没有主体。"，可以增加稳定性
 # 在neg prompt中添加"安静，固定"等词语可以增加动态性。
-prompt = "一只猫正在弹吉他。"
-negative_prompt = "扭曲的身体，肢体残缺，文本字幕，漫画，静止，丑陋，错误，乱码。"
+# prompt = "一只猫正在弹吉他。"
+# negative_prompt = "扭曲的身体，肢体残缺，文本字幕，漫画，静止，丑陋，错误，乱码。"
 #
 # Using longer neg prompt such as "Blurring, mutation, deformation, distortion, dark and solid, comics, text subtitles, line art." can increase stability
 # Adding words such as "quiet, solid" to the neg prompt can increase dynamism.
-# prompt                  = "A cute cat is playing the guitar. "
-# negative_prompt         = "Twisted body, limb deformities, text captions, comic, static, ugly, error, messy code.. "
+prompt = "A woman is sitting in a car, playing with something while talking."
+negative_prompt = "Twisted body, limb deformities, text captions, comic, static, ugly, error, messy code, Blurring, mutation, deformation, distortion, dark and solid, comics, text subtitles, line art, quiet, solid."
 guidance_scale = 6.0
 seed = 43
 num_inference_steps = 50
