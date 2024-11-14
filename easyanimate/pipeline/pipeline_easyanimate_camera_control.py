@@ -120,7 +120,7 @@ def add_noise_to_reference_video(image, ratio=None):
     return image
 
 
-class EasyAnimatePipeline_Multi_Text_Encoder_Inpaint(DiffusionPipeline):
+class EasyAnimatePipelineCameraControl(DiffusionPipeline):
     r"""
     Pipeline for text-to-video generation using EasyAnimate.
 
