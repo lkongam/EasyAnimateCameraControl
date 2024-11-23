@@ -610,7 +610,7 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
         return Transformer3DModelOutput(sample=output)
 
     @classmethod
-    def from_pretrained_2d(cls, pretrained_model_path, subfolder=None, patch_size=2, transformer_additional_kwargs={}):
+    def from_pretrained_2d(cls, pretrained_model_path, subfolder=None, patch_size=2, transformer_additional_kwargs={}, low_cpu_mem_usage=False, torch_dtype=torch.bfloat16):
         if subfolder is not None:
             pretrained_model_path = os.path.join(pretrained_model_path, subfolder)
         print(f"loaded 3D transformer's pretrained weights from {pretrained_model_path} ...")
@@ -623,17 +623,71 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
 
         from diffusers.utils import WEIGHTS_NAME
 
-        model = cls.from_config(config, **transformer_additional_kwargs)
         model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
         model_file_safetensors = model_file.replace(".bin", ".safetensors")
-        if os.path.exists(model_file_safetensors):
+
+        if low_cpu_mem_usage:
+            try:
+                import re
+                from diffusers.utils import is_accelerate_available
+                from diffusers.models.modeling_utils import load_model_dict_into_meta
+
+                if is_accelerate_available():
+                    import accelerate
+
+                # Instantiate model with empty weights
+                with accelerate.init_empty_weights():
+                    model = cls.from_config(config, **transformer_additional_kwargs)
+
+                param_device = "cpu"
+                from safetensors.torch import load_file, safe_open
+
+                state_dict = load_file(model_file_safetensors)
+                model._convert_deprecated_attention_blocks(state_dict)
+                # move the params from meta device to cpu
+                missing_keys = set(model.state_dict().keys()) - set(state_dict.keys())
+                if len(missing_keys) > 0:
+                    raise ValueError(
+                        f"Cannot load {cls} from {pretrained_model_path} because the following keys are"
+                        f" missing: \n {', '.join(missing_keys)}. \n Please make sure to pass"
+                        " `low_cpu_mem_usage=False` and `device_map=None` if you want to randomly initialize"
+                        " those weights or else make sure your checkpoint file is correct."
+                    )
+
+                unexpected_keys = load_model_dict_into_meta(
+                    model,
+                    state_dict,
+                    device=param_device,
+                    dtype=torch_dtype,
+                    model_name_or_path=pretrained_model_path,
+                )
+
+                if cls._keys_to_ignore_on_load_unexpected is not None:
+                    for pat in cls._keys_to_ignore_on_load_unexpected:
+                        unexpected_keys = [k for k in unexpected_keys if re.search(pat, k) is None]
+
+                if len(unexpected_keys) > 0:
+                    print(f"Some weights of the model checkpoint were not used when initializing {cls.__name__}: \n {[', '.join(unexpected_keys)]}")
+                return model
+            except Exception as e:
+                print(f"The low_cpu_mem_usage mode is not work because {e}. Use low_cpu_mem_usage=False instead.")
+
+        model = cls.from_config(config, **transformer_additional_kwargs)
+        if os.path.exists(model_file):
+            state_dict = torch.load(model_file, map_location="cpu")
+        elif os.path.exists(model_file_safetensors):
             from safetensors.torch import load_file, safe_open
 
             state_dict = load_file(model_file_safetensors)
         else:
-            if not os.path.isfile(model_file):
-                raise RuntimeError(f"{model_file} does not exist")
-            state_dict = torch.load(model_file, map_location="cpu")
+            from safetensors.torch import load_file, safe_open
+
+            model_files_safetensors = glob.glob(os.path.join(pretrained_model_path, "*.safetensors"))
+            state_dict = {}
+            for model_file_safetensors in model_files_safetensors:
+                _state_dict = load_file(model_file_safetensors)
+                for key in _state_dict:
+                    state_dict[key] = _state_dict[key]
 
         if model.state_dict()['pos_embed.proj.weight'].size() != state_dict['pos_embed.proj.weight'].size():
             new_shape = model.state_dict()['pos_embed.proj.weight'].size()
@@ -667,6 +721,7 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
         params = [p.numel() if "attn_temporal." in n else 0 for n, p in model.named_parameters()]
         print(f"### Attn temporal Parameters: {sum(params) / 1e6} M")
 
+        model = model.to(torch_dtype)
         return model
 
 
@@ -1042,7 +1097,7 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
         return Transformer2DModelOutput(sample=output)
 
     @classmethod
-    def from_pretrained_2d(cls, pretrained_model_path, subfolder=None, patch_size=2, transformer_additional_kwargs={}):
+    def from_pretrained_2d(cls, pretrained_model_path, subfolder=None, transformer_additional_kwargs={}, low_cpu_mem_usage=False, torch_dtype=torch.bfloat16):
         if subfolder is not None:
             pretrained_model_path = os.path.join(pretrained_model_path, subfolder)
         print(f"loaded 3D transformer's pretrained weights from {pretrained_model_path} ...")
@@ -1055,17 +1110,71 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
 
         from diffusers.utils import WEIGHTS_NAME
 
-        model = cls.from_config(config, **transformer_additional_kwargs)
         model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
         model_file_safetensors = model_file.replace(".bin", ".safetensors")
-        if os.path.exists(model_file_safetensors):
+
+        if low_cpu_mem_usage:
+            try:
+                import re
+                from diffusers.utils import is_accelerate_available
+                from diffusers.models.modeling_utils import load_model_dict_into_meta
+
+                if is_accelerate_available():
+                    import accelerate
+
+                # Instantiate model with empty weights
+                with accelerate.init_empty_weights():
+                    model = cls.from_config(config, **transformer_additional_kwargs)
+
+                param_device = "cpu"
+                from safetensors.torch import load_file, safe_open
+
+                state_dict = load_file(model_file_safetensors)
+                model._convert_deprecated_attention_blocks(state_dict)
+                # move the params from meta device to cpu
+                missing_keys = set(model.state_dict().keys()) - set(state_dict.keys())
+                if len(missing_keys) > 0:
+                    raise ValueError(
+                        f"Cannot load {cls} from {pretrained_model_path} because the following keys are"
+                        f" missing: \n {', '.join(missing_keys)}. \n Please make sure to pass"
+                        " `low_cpu_mem_usage=False` and `device_map=None` if you want to randomly initialize"
+                        " those weights or else make sure your checkpoint file is correct."
+                    )
+
+                unexpected_keys = load_model_dict_into_meta(
+                    model,
+                    state_dict,
+                    device=param_device,
+                    dtype=torch_dtype,
+                    model_name_or_path=pretrained_model_path,
+                )
+
+                if cls._keys_to_ignore_on_load_unexpected is not None:
+                    for pat in cls._keys_to_ignore_on_load_unexpected:
+                        unexpected_keys = [k for k in unexpected_keys if re.search(pat, k) is None]
+
+                if len(unexpected_keys) > 0:
+                    print(f"Some weights of the model checkpoint were not used when initializing {cls.__name__}: \n {[', '.join(unexpected_keys)]}")
+                return model
+            except Exception as e:
+                print(f"The low_cpu_mem_usage mode is not work because {e}. Use low_cpu_mem_usage=False instead.")
+
+        model = cls.from_config(config, **transformer_additional_kwargs)
+        if os.path.exists(model_file):
+            state_dict = torch.load(model_file, map_location="cpu")
+        elif os.path.exists(model_file_safetensors):
             from safetensors.torch import load_file, safe_open
 
             state_dict = load_file(model_file_safetensors)
         else:
-            if not os.path.isfile(model_file):
-                raise RuntimeError(f"{model_file} does not exist")
-            state_dict = torch.load(model_file, map_location="cpu")
+            from safetensors.torch import load_file, safe_open
+
+            model_files_safetensors = glob.glob(os.path.join(pretrained_model_path, "*.safetensors"))
+            state_dict = {}
+            for model_file_safetensors in model_files_safetensors:
+                _state_dict = load_file(model_file_safetensors)
+                for key in _state_dict:
+                    state_dict[key] = _state_dict[key]
 
         if model.state_dict()['pos_embed.proj.weight'].size() != state_dict['pos_embed.proj.weight'].size():
             new_shape = model.state_dict()['pos_embed.proj.weight'].size()
@@ -1115,6 +1224,7 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
         params = [p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()]
         print(f"### attn1 Parameters: {sum(params) / 1e6} M")
 
+        model = model.to(torch_dtype)
         return model
 
 
@@ -1137,6 +1247,7 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
         timestep_activation_fn: str = "silu",
         freq_shift: int = 0,
         num_layers: int = 30,
+        mmdit_layers: int = 10000,
         dropout: float = 0.0,
         time_embed_dim: int = 512,
         text_embed_dim: int = 4096,
@@ -1190,6 +1301,7 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
                     norm_elementwise_affine=norm_elementwise_affine,
                     norm_eps=norm_eps,
                     after_norm=after_norm,
+                    is_mmdit_block=True if _ < mmdit_layers else False,
                 )
                 for _ in range(num_layers)
             ]
@@ -1323,7 +1435,7 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
         return Transformer2DModelOutput(sample=output)
 
     @classmethod
-    def from_pretrained_2d(cls, pretrained_model_path, subfolder=None, transformer_additional_kwargs={}):
+    def from_pretrained_2d(cls, pretrained_model_path, subfolder=None, transformer_additional_kwargs={}, low_cpu_mem_usage=False, torch_dtype=torch.bfloat16):
         if subfolder is not None:
             pretrained_model_path = os.path.join(pretrained_model_path, subfolder)
         print(f"loaded 3D transformer's pretrained weights from {pretrained_model_path} ...")
@@ -1339,6 +1451,54 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
         model = cls.from_config(config, **transformer_additional_kwargs)
         model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
         model_file_safetensors = model_file.replace(".bin", ".safetensors")
+
+        if low_cpu_mem_usage:
+            try:
+                import re
+                from diffusers.utils import is_accelerate_available
+                from diffusers.models.modeling_utils import load_model_dict_into_meta
+
+                if is_accelerate_available():
+                    import accelerate
+
+                # Instantiate model with empty weights
+                with accelerate.init_empty_weights():
+                    model = cls.from_config(config, **transformer_additional_kwargs)
+
+                param_device = "cpu"
+                from safetensors.torch import load_file, safe_open
+
+                state_dict = load_file(model_file_safetensors)
+                model._convert_deprecated_attention_blocks(state_dict)
+                # move the params from meta device to cpu
+                missing_keys = set(model.state_dict().keys()) - set(state_dict.keys())
+                if len(missing_keys) > 0:
+                    raise ValueError(
+                        f"Cannot load {cls} from {pretrained_model_path} because the following keys are"
+                        f" missing: \n {', '.join(missing_keys)}. \n Please make sure to pass"
+                        " `low_cpu_mem_usage=False` and `device_map=None` if you want to randomly initialize"
+                        " those weights or else make sure your checkpoint file is correct."
+                    )
+
+                unexpected_keys = load_model_dict_into_meta(
+                    model,
+                    state_dict,
+                    device=param_device,
+                    dtype=torch_dtype,
+                    model_name_or_path=pretrained_model_path,
+                )
+
+                if cls._keys_to_ignore_on_load_unexpected is not None:
+                    for pat in cls._keys_to_ignore_on_load_unexpected:
+                        unexpected_keys = [k for k in unexpected_keys if re.search(pat, k) is None]
+
+                if len(unexpected_keys) > 0:
+                    print(f"Some weights of the model checkpoint were not used when initializing {cls.__name__}: \n {[', '.join(unexpected_keys)]}")
+                return model
+            except Exception as e:
+                print(f"The low_cpu_mem_usage mode is not work because {e}. Use low_cpu_mem_usage=False instead.")
+
+        model = cls.from_config(config, **transformer_additional_kwargs)
         if os.path.exists(model_file):
             state_dict = torch.load(model_file, map_location="cpu")
         elif os.path.exists(model_file_safetensors):
@@ -1553,7 +1713,7 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         return Transformer2DModelOutput(sample=output)
 
     @classmethod
-    def from_pretrained_2d(cls, pretrained_model_path, subfolder=None, transformer_additional_kwargs={}):
+    def from_pretrained_2d(cls, pretrained_model_path, subfolder=None, transformer_additional_kwargs={}, low_cpu_mem_usage=False, torch_dtype=torch.bfloat16):
         if subfolder is not None:
             pretrained_model_path = os.path.join(pretrained_model_path, subfolder)
         print(f"loaded 3D transformer's pretrained weights from {pretrained_model_path} ...")
@@ -1569,6 +1729,54 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         model = cls.from_config(config, **transformer_additional_kwargs)
         model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
         model_file_safetensors = model_file.replace(".bin", ".safetensors")
+
+        if low_cpu_mem_usage:
+            try:
+                import re
+                from diffusers.utils import is_accelerate_available
+                from diffusers.models.modeling_utils import load_model_dict_into_meta
+
+                if is_accelerate_available():
+                    import accelerate
+
+                # Instantiate model with empty weights
+                with accelerate.init_empty_weights():
+                    model = cls.from_config(config, **transformer_additional_kwargs)
+
+                param_device = "cpu"
+                from safetensors.torch import load_file, safe_open
+
+                state_dict = load_file(model_file_safetensors)
+                model._convert_deprecated_attention_blocks(state_dict)
+                # move the params from meta device to cpu
+                missing_keys = set(model.state_dict().keys()) - set(state_dict.keys())
+                if len(missing_keys) > 0:
+                    raise ValueError(
+                        f"Cannot load {cls} from {pretrained_model_path} because the following keys are"
+                        f" missing: \n {', '.join(missing_keys)}. \n Please make sure to pass"
+                        " `low_cpu_mem_usage=False` and `device_map=None` if you want to randomly initialize"
+                        " those weights or else make sure your checkpoint file is correct."
+                    )
+
+                unexpected_keys = load_model_dict_into_meta(
+                    model,
+                    state_dict,
+                    device=param_device,
+                    dtype=torch_dtype,
+                    model_name_or_path=pretrained_model_path,
+                )
+
+                if cls._keys_to_ignore_on_load_unexpected is not None:
+                    for pat in cls._keys_to_ignore_on_load_unexpected:
+                        unexpected_keys = [k for k in unexpected_keys if re.search(pat, k) is None]
+
+                if len(unexpected_keys) > 0:
+                    print(f"Some weights of the model checkpoint were not used when initializing {cls.__name__}: \n {[', '.join(unexpected_keys)]}")
+                return model
+            except Exception as e:
+                print(f"The low_cpu_mem_usage mode is not work because {e}. Use low_cpu_mem_usage=False instead.")
+
+        model = cls.from_config(config, **transformer_additional_kwargs)
         if os.path.exists(model_file):
             state_dict = torch.load(model_file, map_location="cpu")
         elif os.path.exists(model_file_safetensors):
@@ -1618,4 +1826,5 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         params = [p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()]
         print(f"### attn1 Parameters: {sum(params) / 1e6} M")
 
+        model = model.to(torch_dtype)
         return model

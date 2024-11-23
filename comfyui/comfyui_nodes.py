@@ -69,12 +69,14 @@ class LoadEasyAnimateModel:
                         'EasyAnimateV3-XL-2-InP-768x768',
                         'EasyAnimateV3-XL-2-InP-960x960',
                         'EasyAnimateV4-XL-2-InP',
+                        'EasyAnimateV5-7b-zh-InP',
+                        'EasyAnimateV5-7b-zh',
                         'EasyAnimateV5-12b-zh-InP',
                         'EasyAnimateV5-12b-zh-Control',
                         'EasyAnimateV5-12b-zh',
                     ],
                     {
-                        "default": 'EasyAnimateV5-12b-zh-InP',
+                        "default": 'EasyAnimateV5-7b-zh-InP',
                     }
                 ),
                 "GPU_memory_mode":(
@@ -161,8 +163,10 @@ class LoadEasyAnimateModel:
         transformer = Choosen_Transformer3DModel.from_pretrained_2d(
             model_name, 
             subfolder="transformer",
-            transformer_additional_kwargs=transformer_additional_kwargs
-        ).to(weight_dtype)
+            transformer_additional_kwargs=transformer_additional_kwargs,
+            torch_dtype=torch.float8_e4m3fn if GPU_memory_mode == "model_cpu_offload_and_qfloat8" else weight_dtype,
+            low_cpu_mem_usage=True,
+        )
         # Update pbar
         pbar.update(1) 
 
@@ -279,7 +283,6 @@ class LoadEasyAnimateModel:
             pipeline.enable_sequential_cpu_offload()
         elif GPU_memory_mode == "model_cpu_offload_and_qfloat8":
             pipeline.enable_model_cpu_offload()
-            pipeline.enable_autocast_float8_transformer()
             convert_weight_dtype_wrapper(transformer, weight_dtype)
         else:
             pipeline.enable_model_cpu_offload()
