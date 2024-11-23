@@ -18,6 +18,7 @@ from func_timeout import FunctionTimedOut, func_timeout
 from PIL import Image
 from torch.utils.data import BatchSampler, Sampler
 from torch.utils.data.dataset import Dataset
+from packaging import version as pver
 
 VIDEO_READER_TIMEOUT = 20
 
@@ -580,6 +581,583 @@ class ImageVideoControlDataset(Dataset):
             if (mask == 1).all():
                 ref_pixel_values = torch.ones_like(ref_pixel_values) * -1
             sample["ref_pixel_values"] = ref_pixel_values
+
+        return sample
+
+
+def get_video_from_dir(video_dir):
+    cap = cv2.VideoCapture(video_dir)
+
+    if not cap.isOpened():
+        print(f"Cannot Open the Video File: {video_dir}")
+        return []
+
+    whole_video = []
+    frame_count = 0
+
+    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        whole_video.append(frame)
+        frame_count += 1
+
+    cap.release()
+
+    return whole_video, frame_height, frame_width
+
+
+def get_camera_from_dir(pose_file_dir):
+    whole_camera_para = []
+
+    try:
+        with open(pose_file_dir, 'r', encoding='utf-8') as file:
+            # 读取所有行
+            lines = file.readlines()
+
+            # 确保文件至少有两行
+            if len(lines) < 2:
+                print("文件内容不足两行，无法读取数据。")
+                return whole_camera_para
+
+            # 跳过第一行，从第二行开始处理
+            for idx, line in enumerate(lines[1:], start=2):
+                # 去除首尾空白字符并按空格分割
+                parts = line.strip().split()
+
+                # 检查每行是否有19个数字
+                if len(parts) != 19:
+                    print(f"警告：第 {idx} 行的数字数量不是19，跳过该行。")
+                    continue
+
+                try:
+                    # 将字符串转换为浮点数
+                    numbers = [float(part) for part in parts]
+                    whole_camera_para.append(numbers)
+                except ValueError as ve:
+                    print(f"警告：第 {idx} 行包含非数字字符，跳过该行。错误详情: {ve}")
+                    continue
+
+    except FileNotFoundError:
+        print(f"错误：文件 '{pose_file_dir}' 未找到。")
+    except Exception as e:
+        print(f"发生错误：{e}")
+
+    return whole_camera_para
+
+
+class Camera(object):
+    def __init__(self, entry):
+        fx, fy, cx, cy = entry[1:5]
+        self.fx = fx
+        self.fy = fy
+        self.cx = cx
+        self.cy = cy
+        w2c_mat = np.array(entry[7:]).reshape(3, 4)
+        w2c_mat_4x4 = np.eye(4)
+        w2c_mat_4x4[:3, :] = w2c_mat
+        self.w2c_mat = w2c_mat_4x4
+        try:
+            self.c2w_mat = np.linalg.inv(w2c_mat_4x4)
+        except:
+            self.c2w_mat = np.linalg.pinv(w2c_mat_4x4)
+
+
+def custom_meshgrid(*args):
+    # ref: https://pytorch.org/docs/stable/generated/torch.meshgrid.html?highlight=meshgrid#torch.meshgrid
+    if pver.parse(torch.__version__) < pver.parse('1.10'):
+        return torch.meshgrid(*args)
+    else:
+        return torch.meshgrid(*args, indexing='ij')
+
+
+def ray_condition(K, c2w, H, W, device, flip_flag=None):
+    # c2w: B, V, 4, 4
+    # K: B, V, 4
+
+    B, V = K.shape[:2]
+
+    j, i = custom_meshgrid(
+        torch.linspace(0, H - 1, H, device=device, dtype=c2w.dtype),
+        torch.linspace(0, W - 1, W, device=device, dtype=c2w.dtype),
+    )
+    i = i.reshape([1, 1, H * W]).expand([B, V, H * W]) + 0.5  # [B, V, HxW]
+    j = j.reshape([1, 1, H * W]).expand([B, V, H * W]) + 0.5  # [B, V, HxW]
+
+    n_flip = torch.sum(flip_flag).item() if flip_flag is not None else 0
+    if n_flip > 0:
+        j_flip, i_flip = custom_meshgrid(torch.linspace(0, H - 1, H, device=device, dtype=c2w.dtype), torch.linspace(W - 1, 0, W, device=device, dtype=c2w.dtype))
+        i_flip = i_flip.reshape([1, 1, H * W]).expand(B, 1, H * W) + 0.5
+        j_flip = j_flip.reshape([1, 1, H * W]).expand(B, 1, H * W) + 0.5
+        i[:, flip_flag, ...] = i_flip
+        j[:, flip_flag, ...] = j_flip
+
+    fx, fy, cx, cy = K.chunk(4, dim=-1)  # B,V, 1
+    fx += 1e-10
+    fy += 1e-10
+    zs = torch.ones_like(i)  # [B, V, HxW]
+    xs = (i - cx) / fx * zs
+    ys = (j - cy) / fy * zs
+    zs = zs.expand_as(ys)
+
+    directions = torch.stack((xs, ys, zs), dim=-1)  # B, V, HW, 3
+    directions = directions / directions.norm(dim=-1, keepdim=True)  # B, V, HW, 3
+
+    rays_d = directions @ c2w[..., :3, :3].transpose(-1, -2)  # B, V, HW, 3
+    rays_o = c2w[..., :3, 3]  # B, V, 3
+    rays_o = rays_o[:, :, None].expand_as(rays_d)  # B, V, HW, 3
+    # c2w @ dirctions
+    rays_dxo = torch.cross(rays_o, rays_d)  # B, V, HW, 3
+    plucker = torch.cat([rays_dxo, rays_d], dim=-1)
+    plucker = plucker.reshape(B, c2w.shape[1], H, W, 6)  # B, V, H, W, 6
+    # plucker = plucker.permute(0, 1, 4, 2, 3)
+    return plucker
+
+
+def get_relative_pose(cam_params):
+    abs_w2cs = [cam_param.w2c_mat for cam_param in cam_params]
+    abs_c2ws = [cam_param.c2w_mat for cam_param in cam_params]
+
+    target_cam_c2w = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+    abs2rel = target_cam_c2w @ abs_w2cs[0]
+    ret_poses = [target_cam_c2w] + [abs2rel @ abs_c2w for abs_c2w in abs_c2ws[1:]]
+    ret_poses = np.array(ret_poses, dtype=np.float32)
+    return ret_poses
+
+
+def compute_plucker(cam_params, video_sample_size, ori_h, ori_w):
+
+    cam_params = [Camera(cam_param) for cam_param in cam_params]
+
+    ori_wh_ratio = ori_w / ori_h
+    sample_wh_ratio = video_sample_size[1] / video_sample_size[0]
+    if ori_wh_ratio > sample_wh_ratio:  # rescale fx
+        resized_ori_w = video_sample_size[0] * ori_wh_ratio
+        for cam_param in cam_params:
+            cam_param.fx = resized_ori_w * cam_param.fx / video_sample_size[1]
+    else:  # rescale fy
+        resized_ori_h = video_sample_size[1] / ori_wh_ratio
+        for cam_param in cam_params:
+            cam_param.fy = resized_ori_h * cam_param.fy / video_sample_size[0]
+
+    intrinsics = np.asarray(
+        [
+            [cam_param.fx * video_sample_size[1], cam_param.fy * video_sample_size[0], cam_param.cx * video_sample_size[1], cam_param.cy * video_sample_size[0]]
+            for cam_param in cam_params
+        ],
+        dtype=np.float32,
+    )
+
+    intrinsics = torch.as_tensor(intrinsics)[None]  # [1, n_frame, 4]
+    c2w_poses = get_relative_pose(cam_params)
+    c2w = torch.as_tensor(c2w_poses)[None]  # [1, n_frame, 4, 4]
+    plucker_embedding = ray_condition(intrinsics, c2w, video_sample_size[0], video_sample_size[1], device='cpu')[0].permute(0, 3, 1, 2).contiguous()
+
+    return plucker_embedding
+
+
+def get_plucker_embedding(whole_camera_para, batch_index_input, batch_index_output, video_sample_size, ori_h, ori_w):
+    input_camera_para = [whole_camera_para[i] for i in batch_index_input]
+    output_camera_para = [whole_camera_para[i] for i in batch_index_output]
+
+    plucker_embedding_input = compute_plucker(input_camera_para, video_sample_size, ori_h, ori_w)
+    plucker_embedding_output = compute_plucker(output_camera_para, video_sample_size, ori_h, ori_w)
+
+    return plucker_embedding_input, plucker_embedding_output
+
+
+def get_pixel_value(whole_video, batch_index_input, batch_index_output, video_transforms):
+    # 提取输入和输出帧
+    input_frames = [whole_video[i] for i in batch_index_input]
+    output_frames = [whole_video[i] for i in batch_index_output]
+
+    # 定义 ToTensor 转换，如果 self.video_transforms 中已经包含了 ToTensor，则可以省略
+    to_tensor = transforms.ToTensor()
+
+    # 处理输入帧
+    input_tensors = []
+    for frame in input_frames:
+        tensor = to_tensor(frame)  # 转换为 [C, H, W] 并归一化到 [0, 1]
+        input_tensors.append(tensor)
+    pixel_values_input = torch.stack(input_tensors, dim=0)  # 形状 [n, C, H, W]
+
+    # 应用额外的转换（如果有的话）
+    if video_transforms:
+        pixel_values_input = video_transforms(pixel_values_input)
+
+    # 处理输出帧
+    output_tensors = []
+    for frame in output_frames:
+        tensor = to_tensor(frame)  # 转换为 [C, H, W] 并归一化到 [0, 1]
+        output_tensors.append(tensor)
+    pixel_values_output = torch.stack(output_tensors, dim=0)  # 形状 [n, C, H, W]
+
+    # 应用额外的转换（如果有的话）
+    if video_transforms:
+        pixel_values_output = video_transforms(pixel_values_output)
+
+    return pixel_values_input, pixel_values_output
+
+
+class ALLDatasets(Dataset):
+    def __init__(
+        self,
+        ann_path,
+        data_root=None,
+        video_sample_size=[384, 672],
+        video_sample_stride=4,
+        video_sample_n_frames=16,
+    ):
+        print(f"loading annotations from {ann_path} ...")
+        if ann_path.endswith('.csv'):
+            with open(ann_path, 'r') as csvfile:
+                dataset = list(csv.DictReader(csvfile))
+        elif ann_path.endswith('.json'):
+            dataset = json.load(open(ann_path))
+
+        self.data_root = data_root
+
+        self.objaverse_dataset_list = []
+        self.realestate_dataset_list = []
+        self.kubric_dataset_list = []
+
+        for data in dataset:
+            if data.get('type') == 'objaverse':
+                self.objaverse_dataset_list.append(data)
+            elif data.get('type') == 'realestate':
+                self.realestate_dataset_list.append(data)
+            elif data.get('type') == 'kubric':
+                self.kubric_dataset_list.append(data)
+
+        self.video_sample_stride = video_sample_stride
+        self.video_sample_n_frames = video_sample_n_frames
+        self.video_sample_size = tuple(video_sample_size) if not isinstance(video_sample_size, int) else (video_sample_size, video_sample_size)
+
+        self.objaverse_dataset = ObjaverseDataset(self.objaverse_dataset_list, self.data_root, self.video_sample_stride, self.video_sample_n_frames, self.video_sample_size)
+        self.realestate_dataset = RealEstateDataset(self.realestate_dataset_list, self.data_root, self.video_sample_stride, self.video_sample_n_frames, self.video_sample_size)
+        self.kubric_dataset = KubricDataset(self.kubric_dataset_list, self.data_root, self.video_sample_stride, self.video_sample_n_frames, self.video_sample_size)
+
+        self.len_objaverse = len(self.objaverse_dataset)
+        self.len_realestate = len(self.realestate_dataset)
+        self.len_kubric = len(self.kubric_dataset)
+
+        self.length = self.len_objaverse + self.len_realestate + self.len_kubric
+        print(f"data scale: {self.length}")
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        if idx < 0 or idx >= self.length:
+            raise IndexError(f"Index {idx} out of range for dataset of size {self.length}")
+
+        sample = {}
+        if idx < self.len_objaverse:
+            sample = self.objaverse_dataset[idx]
+        elif idx < self.len_objaverse + self.len_realestate:
+            adjusted_index = idx - self.len_objaverse
+            sample = self.realestate_dataset[adjusted_index]
+        else:
+            adjusted_index = idx - self.len_objaverse - self.len_realestate
+            sample = self.kubric_dataset[adjusted_index]
+
+        sample['idx'] = idx
+
+        return sample
+
+
+class ObjaverseDataset(Dataset):
+    def __init__(self, objaverse_dataset_list, data_root, video_sample_stride, video_sample_n_frames, video_sample_size):
+        self.objaverse_dataset_list = objaverse_dataset_list
+        self.data_root = data_root
+        self.video_sample_stride = video_sample_stride
+        self.video_sample_n_frames = video_sample_n_frames
+        self.video_sample_size = video_sample_size
+        self.length = len(self.objaverse_dataset_list)
+
+        self.video_transforms = transforms.Compose(
+            [
+                transforms.Resize(self.video_sample_size),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
+            ]
+        )
+
+    def get_batch_index(self, length_of_video):
+        mid = length_of_video // 2
+        front_half = mid
+        back_half = length_of_video - mid
+
+        def compute_stride(num_frames, desired_stride, num_samples):
+            max_possible_stride = num_frames // num_samples
+            if max_possible_stride == 0:
+                return 1  # 最小步长为1
+            return min(desired_stride, max_possible_stride)
+
+        # 计算输入和输出部分的步长
+        stride_input = compute_stride(front_half, self.video_sample_stride, self.video_sample_n_frames)
+        stride_output = compute_stride(back_half, self.video_sample_stride, self.video_sample_n_frames)
+
+        def get_indices(start, num_frames, stride, total_length):
+            indices = [start + i * stride for i in range(num_frames)]
+            # 确保索引不超过总长度
+            if indices[-1] >= total_length:
+                # 如果最后一个索引超出范围，调整起始点
+                start = total_length - (num_frames * stride)
+                start = max(start, 0)
+                indices = [start + i * stride for i in range(num_frames)]
+            return indices
+
+        # 获取输入部分的帧索引
+        batch_index_input = get_indices(start=0, num_frames=self.video_sample_n_frames, stride=stride_input, total_length=front_half)
+
+        # 获取输出部分的帧索引
+        batch_index_output = get_indices(start=mid, num_frames=self.video_sample_n_frames, stride=stride_output, total_length=length_of_video)
+
+        return batch_index_input, batch_index_output
+
+    def get_batch(self, data_info):
+        data_type = data_info['type']
+
+        video_id, pose_file = data_info['file_path'], data_info['text']
+
+        if self.data_root is None:
+            video_dir = video_id
+            pose_file_dir = pose_file
+        else:
+            video_dir = os.path.join(self.data_root, video_id)
+            pose_file_dir = os.path.join(self.data_root, pose_file)
+
+        whole_video, ori_h, ori_w = get_video_from_dir(video_dir)
+        whole_camera_para = get_camera_from_dir(pose_file_dir)
+
+        # print(len(whole_video))
+        # print(len(whole_camera_para))
+
+        assert len(whole_video) == len(whole_camera_para), "the length of video must be euqal with that of camera parameter."
+
+        batch_index_input, batch_index_output = self.get_batch_index(len(whole_video))
+        plucker_embedding_input, plucker_embedding_output = get_plucker_embedding(
+            whole_camera_para,
+            batch_index_input,
+            batch_index_output,
+            self.video_sample_size,
+            ori_h,
+            ori_w,
+        )
+        pixel_values_input, pixel_values_output = get_pixel_value(whole_video, batch_index_input, batch_index_output, self.video_transforms)
+
+        return pixel_values_input, pixel_values_output, plucker_embedding_input, plucker_embedding_output, data_type
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        data_info = self.objaverse_dataset_list[idx]
+        sample = {}
+
+        pixel_values_input, pixel_values_output, plucker_embedding_input, plucker_embedding_output, data_type = self.get_batch(data_info)
+        sample["pixel_values_input"] = pixel_values_input
+        sample["pixel_values_output"] = pixel_values_output
+        sample["plucker_embedding_input"] = plucker_embedding_input
+        sample["plucker_embedding_output"] = plucker_embedding_output
+        sample["data_type"] = data_type
+        sample["idx"] = idx
+
+        return sample
+
+
+class RealEstateDataset(Dataset):
+    def __init__(self, realestate_dataset_list, data_root, video_sample_stride, video_sample_n_frames, video_sample_size):
+        self.realestate_dataset_list = realestate_dataset_list
+        self.data_root = data_root
+        self.video_sample_stride = video_sample_stride
+        self.video_sample_n_frames = video_sample_n_frames
+        self.video_sample_size = video_sample_size
+        self.length = len(self.realestate_dataset_list)
+
+        self.video_transforms = transforms.Compose(
+            [
+                transforms.Resize(self.video_sample_size),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
+            ]
+        )
+
+    def get_batch_index(self, length_of_video):
+        def compute_stride(num_frames, desired_stride, num_samples):
+            max_possible_stride = num_frames // num_samples
+            if max_possible_stride == 0:
+                return 1  # 最小步长为1
+            return min(desired_stride, max_possible_stride)
+
+        # 计算输入和输出部分的步长
+        stride = compute_stride(length_of_video, self.video_sample_stride, self.video_sample_n_frames)
+
+        def get_indices(start, num_frames, stride, total_length):
+            indices = [start + i * stride for i in range(num_frames)]
+            # 确保索引不超过总长度
+            if indices[-1] >= total_length:
+                # 如果最后一个索引超出范围，调整起始点
+                start = total_length - (num_frames * stride)
+                start = max(start, 0)
+                indices = [start + i * stride for i in range(num_frames)]
+            return indices
+
+        # 获取输入部分的帧索引
+        batch_index_output = get_indices(start=0, num_frames=self.video_sample_n_frames, stride=stride, total_length=length_of_video)
+        batch_index_input = [batch_index_output[0]] * self.video_sample_n_frames
+
+        return batch_index_input, batch_index_output
+
+    def get_batch(self, data_info):
+        data_type = data_info['type']
+
+        video_id, pose_file = data_info['file_path'], data_info['text']
+
+        if self.data_root is None:
+            video_dir = video_id
+            pose_file_dir = pose_file
+        else:
+            video_dir = os.path.join(self.data_root, video_id)
+            pose_file_dir = os.path.join(self.data_root, pose_file)
+
+        whole_video, ori_h, ori_w = get_video_from_dir(video_dir)
+        whole_camera_para = get_camera_from_dir(pose_file_dir)
+
+        # print(len(whole_video))
+        # print(len(whole_camera_para))
+
+        assert len(whole_video) == len(whole_camera_para), "the length of video must be euqal with that of camera parameter."
+
+        batch_index_input, batch_index_output = self.get_batch_index(len(whole_video))
+        plucker_embedding_input, plucker_embedding_output = get_plucker_embedding(
+            whole_camera_para,
+            batch_index_input,
+            batch_index_output,
+            self.video_sample_size,
+            ori_h,
+            ori_w,
+        )
+        pixel_values_input, pixel_values_output = get_pixel_value(whole_video, batch_index_input, batch_index_output, self.video_transforms)
+
+        return pixel_values_input, pixel_values_output, plucker_embedding_input, plucker_embedding_output, data_type
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        data_info = self.realestate_dataset_list[idx]
+        sample = {}
+
+        pixel_values_input, pixel_values_output, plucker_embedding_input, plucker_embedding_output, data_type = self.get_batch(data_info)
+        sample["pixel_values_input"] = pixel_values_input
+        sample["pixel_values_output"] = pixel_values_output
+        sample["plucker_embedding_input"] = plucker_embedding_input
+        sample["plucker_embedding_output"] = plucker_embedding_output
+        sample["data_type"] = data_type
+        sample["idx"] = idx
+
+        return sample
+
+
+class KubricDataset(Dataset):
+    def __init__(self, objaverse_dataset_list, data_root, video_sample_stride, video_sample_n_frames, video_sample_size):
+        self.objaverse_dataset_list = objaverse_dataset_list
+        self.data_root = data_root
+        self.video_sample_stride = video_sample_stride
+        self.video_sample_n_frames = video_sample_n_frames
+        self.video_sample_size = video_sample_size
+        self.length = len(self.objaverse_dataset_list)
+
+        self.video_transforms = transforms.Compose(
+            [
+                transforms.Resize(self.video_sample_size),
+                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
+            ]
+        )
+
+    def get_batch_index(self, length_of_video):
+        mid = length_of_video // 2
+        front_half = mid
+        back_half = length_of_video - mid
+
+        def compute_stride(num_frames, desired_stride, num_samples):
+            max_possible_stride = num_frames // num_samples
+            if max_possible_stride == 0:
+                return 1  # 最小步长为1
+            return min(desired_stride, max_possible_stride)
+
+        # 计算输入和输出部分的步长
+        stride_input = compute_stride(front_half, self.video_sample_stride, self.video_sample_n_frames)
+        stride_output = compute_stride(back_half, self.video_sample_stride, self.video_sample_n_frames)
+
+        def get_indices(start, num_frames, stride, total_length):
+            indices = [start + i * stride for i in range(num_frames)]
+            # 确保索引不超过总长度
+            if indices[-1] >= total_length:
+                # 如果最后一个索引超出范围，调整起始点
+                start = total_length - (num_frames * stride)
+                start = max(start, 0)
+                indices = [start + i * stride for i in range(num_frames)]
+            return indices
+
+        # 获取输入部分的帧索引
+        batch_index_input = get_indices(start=0, num_frames=self.video_sample_n_frames, stride=stride_input, total_length=front_half)
+
+        # 获取输出部分的帧索引
+        batch_index_output = get_indices(start=mid, num_frames=self.video_sample_n_frames, stride=stride_output, total_length=length_of_video)
+
+        return batch_index_input, batch_index_output
+
+    def get_batch(self, data_info):
+        data_type = data_info['type']
+
+        video_id, pose_file = data_info['file_path'], data_info['text']
+
+        if self.data_root is None:
+            video_dir = video_id
+            pose_file_dir = pose_file
+        else:
+            video_dir = os.path.join(self.data_root, video_id)
+            pose_file_dir = os.path.join(self.data_root, pose_file)
+
+        whole_video, ori_h, ori_w = get_video_from_dir(video_dir)
+        whole_camera_para = get_camera_from_dir(pose_file_dir)
+
+        # print(len(whole_video))
+        # print(len(whole_camera_para))
+
+        assert len(whole_video) == len(whole_camera_para), "the length of video must be euqal with that of camera parameter."
+
+        batch_index_input, batch_index_output = self.get_batch_index(len(whole_video))
+        plucker_embedding_input, plucker_embedding_output = get_plucker_embedding(
+            whole_camera_para,
+            batch_index_input,
+            batch_index_output,
+            self.video_sample_size,
+            ori_h,
+            ori_w,
+        )
+        pixel_values_input, pixel_values_output = get_pixel_value(whole_video, batch_index_input, batch_index_output, self.video_transforms)
+
+        return pixel_values_input, pixel_values_output, plucker_embedding_input, plucker_embedding_output, data_type
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        data_info = self.objaverse_dataset_list[idx]
+        sample = {}
+
+        pixel_values_input, pixel_values_output, plucker_embedding_input, plucker_embedding_output, data_type = self.get_batch(data_info)
+        sample["pixel_values_input"] = pixel_values_input
+        sample["pixel_values_output"] = pixel_values_output
+        sample["plucker_embedding_input"] = plucker_embedding_input
+        sample["plucker_embedding_output"] = plucker_embedding_output
+        sample["data_type"] = data_type
+        sample["idx"] = idx
 
         return sample
 

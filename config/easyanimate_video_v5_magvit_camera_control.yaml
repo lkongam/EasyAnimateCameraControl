@@ -17,3 +17,6 @@ vae_kwargs:
 
 text_encoder_kwargs:
   enable_multi_text_encoder: true
+
+pose_encoder_kwargs:
+  kernel_size: 12

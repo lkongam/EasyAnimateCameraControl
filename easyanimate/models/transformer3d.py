@@ -1490,17 +1490,7 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         timestep,
         timestep_cond=None,
         encoder_hidden_states: Optional[torch.Tensor] = None,
-        text_embedding_mask: Optional[torch.Tensor] = None,
-        encoder_hidden_states_t5: Optional[torch.Tensor] = None,
-        text_embedding_mask_t5: Optional[torch.Tensor] = None,
-        image_meta_size=None,
-        style=None,
         image_rotary_emb: Optional[torch.Tensor] = None,
-        inpaint_latents: Optional[torch.Tensor] = None,
-        control_latents: Optional[torch.Tensor] = None,
-        ref_latents: Optional[torch.Tensor] = None,
-        clip_encoder_hidden_states: Optional[torch.Tensor] = None,
-        clip_attention_mask: Optional[torch.Tensor] = None,
         return_dict=True,
     ):
         batch_size, channels, video_length, height, width = hidden_states.size()
@@ -1510,43 +1500,10 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         temb = self.time_embedding(temb, timestep_cond)
 
         # 2. Patch embedding
-        if inpaint_latents is not None:
-            hidden_states = torch.concat([hidden_states, inpaint_latents], 1)
-        if control_latents is not None:
-            hidden_states = torch.concat([hidden_states, control_latents], 1)
-
         hidden_states = rearrange(hidden_states, "b c f h w ->(b f) c h w")
         hidden_states = self.proj(hidden_states)
         hidden_states = rearrange(hidden_states, "(b f) c h w -> b c f h w", f=video_length, h=height // self.patch_size, w=width // self.patch_size)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
-
-        encoder_hidden_states = self.text_proj(encoder_hidden_states)
-        if encoder_hidden_states_t5 is not None:
-            encoder_hidden_states_t5 = self.text_proj_t5(encoder_hidden_states_t5)
-            encoder_hidden_states = torch.cat([encoder_hidden_states, encoder_hidden_states_t5], dim=1).contiguous()
-
-        if ref_latents is not None:
-            ref_batch, ref_channels, ref_video_length, ref_height, ref_width = ref_latents.shape
-            ref_latents = rearrange(ref_latents, "b c f h w ->(b f) c h w")
-            ref_latents = self.ref_proj(ref_latents)
-            ref_latents = rearrange(ref_latents, "(b f) c h w -> b c f h w", f=ref_video_length, h=ref_height // self.patch_size, w=ref_width // self.patch_size)
-            ref_latents = ref_latents.flatten(2).transpose(1, 2)
-
-            emb_size = hidden_states.size()[-1]
-            ref_pos_embedding = self.ref_pos_embedding
-            ref_pos_embedding_interpolate = ref_pos_embedding.view(1, 1, self.post_patch_height, self.post_patch_width, emb_size).permute([0, 4, 1, 2, 3])
-            ref_pos_embedding_interpolate = F.interpolate(
-                ref_pos_embedding_interpolate, size=[1, height // self.config.patch_size, width // self.config.patch_size], mode='trilinear', align_corners=False
-            )
-            ref_pos_embedding_interpolate = ref_pos_embedding_interpolate.permute([0, 2, 3, 4, 1]).view(1, -1, emb_size)
-            ref_latents = ref_latents + ref_pos_embedding_interpolate
-
-            encoder_hidden_states = ref_latents
-
-        if clip_encoder_hidden_states is not None:
-            clip_encoder_hidden_states = self.clip_proj(clip_encoder_hidden_states)
-
-            encoder_hidden_states = torch.concat([clip_encoder_hidden_states, ref_latents], dim=1)
 
         # 4. Transformer blocks
         for i, block in enumerate(self.transformer_blocks):

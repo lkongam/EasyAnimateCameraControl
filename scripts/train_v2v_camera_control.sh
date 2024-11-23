@@ -1,16 +1,16 @@
 export MODEL_NAME="models/Diffusion_Transformer/EasyAnimateV5-12b-zh-InP"
-export DATASET_NAME="datasets/internal_datasets/"
-export DATASET_META_NAME="datasets/internal_datasets/metadata.json"
+export DATASET_NAME="datasets/all_datasets/"
+export DATASET_META_NAME="datasets/all_datasets/metadata.json"
 export NCCL_IB_DISABLE=1
 export NCCL_P2P_DISABLE=1
 NCCL_DEBUG=INFO
 
 # When train model with multi machines, use "--config_file accelerate.yaml" instead of "--mixed_precision='bf16'".
-accelerate launch --mixed_precision="bf16" scripts/train.py \
+accelerate launch --use_deepspeed --deepspeed_config_file config/zero_stage2_config.json --deepspeed_multinode_launcher standard scripts/train.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --train_data_dir=$DATASET_NAME \
   --train_data_meta=$DATASET_META_NAME \
-  --config_path "config/easyanimate_video_v5_magvit_multi_text_encoder.yaml" \
+  --config_path "config/easyanimate_video_v5_magvit_camera_control.yaml" \
   --image_sample_size=1024 \
   --video_sample_size=256 \
   --token_sample_size=512 \
@@ -38,5 +38,6 @@ accelerate launch --mixed_precision="bf16" scripts/train.py \
   --not_sigma_loss \
   --enable_bucket \
   --uniform_sampling \
-  --train_mode="inpaint" \
+  --use_deepspeed \
+  --train_mode="CameraControl" \
   --trainable_modules "."
