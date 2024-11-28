@@ -24,7 +24,13 @@ import torch
 import torch.nn.functional as F
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.attention import BasicTransformerBlock
-from diffusers.models.embeddings import PatchEmbed, PixArtAlphaTextProjection, TimestepEmbedding, Timesteps, get_2d_sincos_pos_embed
+from diffusers.models.embeddings import (
+    PatchEmbed,
+    PixArtAlphaTextProjection,
+    TimestepEmbedding,
+    Timesteps,
+    get_2d_sincos_pos_embed,
+)
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNorm, AdaLayerNormContinuous
@@ -33,16 +39,33 @@ from diffusers.utils.torch_utils import maybe_allow_in_graph
 from einops import rearrange
 from torch import nn
 
-from .attention import EasyAnimateDiTBlock, HunyuanDiTBlock, SelfAttentionTemporalTransformerBlock, TemporalTransformerBlock, zero_module
-from .embeddings import HunyuanCombinedTimestepTextSizeStyleEmbedding, TimePositionalEncoding
+from .attention import (
+    EasyAnimateDiTBlock,
+    HunyuanDiTBlock,
+    SelfAttentionTemporalTransformerBlock,
+    TemporalTransformerBlock,
+    zero_module,
+)
+from .embeddings import (
+    HunyuanCombinedTimestepTextSizeStyleEmbedding,
+    TimePositionalEncoding,
+)
 from .norm import AdaLayerNormSingle
-from .patch import CasualPatchEmbed3D, PatchEmbed3D, PatchEmbedF3D, TemporalUpsampler3D, UnPatch1D
+from .patch import (
+    CasualPatchEmbed3D,
+    PatchEmbed3D,
+    PatchEmbedF3D,
+    TemporalUpsampler3D,
+    UnPatch1D,
+)
 from .resampler import Resampler
 
 try:
     from diffusers.models.embeddings import PixArtAlphaTextProjection
 except:
-    from diffusers.models.embeddings import CaptionProjection as PixArtAlphaTextProjection
+    from diffusers.models.embeddings import (
+        CaptionProjection as PixArtAlphaTextProjection,
+    )
 
 
 class CLIPProjection(nn.Module):
@@ -629,8 +652,9 @@ class Transformer3DModel(ModelMixin, ConfigMixin):
         if low_cpu_mem_usage:
             try:
                 import re
-                from diffusers.utils import is_accelerate_available
+
                 from diffusers.models.modeling_utils import load_model_dict_into_meta
+                from diffusers.utils import is_accelerate_available
 
                 if is_accelerate_available():
                     import accelerate
@@ -1116,8 +1140,9 @@ class HunyuanTransformer3DModel(ModelMixin, ConfigMixin):
         if low_cpu_mem_usage:
             try:
                 import re
-                from diffusers.utils import is_accelerate_available
+
                 from diffusers.models.modeling_utils import load_model_dict_into_meta
+                from diffusers.utils import is_accelerate_available
 
                 if is_accelerate_available():
                     import accelerate
@@ -1455,8 +1480,9 @@ class EasyAnimateTransformer3DModel(ModelMixin, ConfigMixin):
         if low_cpu_mem_usage:
             try:
                 import re
-                from diffusers.utils import is_accelerate_available
+
                 from diffusers.models.modeling_utils import load_model_dict_into_meta
+                from diffusers.utils import is_accelerate_available
 
                 if is_accelerate_available():
                     import accelerate
@@ -1570,6 +1596,7 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         timestep_activation_fn: str = "silu",
         freq_shift: int = 0,
         num_layers: int = 30,
+        mmdit_layers: int = 10000,
         dropout: float = 0.0,
         time_embed_dim: int = 512,
         text_embed_dim: int = 4096,
@@ -1602,6 +1629,9 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         self.text_proj = nn.Linear(text_embed_dim, self.inner_dim)
         self.text_proj_t5 = nn.Linear(text_embed_dim_t5, self.inner_dim)
 
+        self.pose_encoder = None
+        self.pose_proj = None
+
         if ref_channels is not None:
             self.ref_proj = nn.Conv2d(ref_channels, self.inner_dim, kernel_size=(patch_size, patch_size), stride=patch_size, bias=True)
             ref_pos_embedding = get_2d_sincos_pos_embed(self.inner_dim, (post_patch_height, post_patch_width))
@@ -1623,6 +1653,7 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
                     norm_elementwise_affine=norm_elementwise_affine,
                     norm_eps=norm_eps,
                     after_norm=after_norm,
+                    is_mmdit_block=True if _ < mmdit_layers else False,
                 )
                 for _ in range(num_layers)
             ]
@@ -1650,7 +1681,18 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         timestep,
         timestep_cond=None,
         encoder_hidden_states: Optional[torch.Tensor] = None,
+        text_embedding_mask: Optional[torch.Tensor] = None,
+        encoder_hidden_states_t5: Optional[torch.Tensor] = None,
+        text_embedding_mask_t5: Optional[torch.Tensor] = None,
+        plucker_embedding: Optional[torch.Tensor] = None,
+        image_meta_size=None,
+        style=None,
         image_rotary_emb: Optional[torch.Tensor] = None,
+        inpaint_latents: Optional[torch.Tensor] = None,
+        control_latents: Optional[torch.Tensor] = None,
+        ref_latents: Optional[torch.Tensor] = None,
+        clip_encoder_hidden_states: Optional[torch.Tensor] = None,
+        clip_attention_mask: Optional[torch.Tensor] = None,
         return_dict=True,
     ):
         batch_size, channels, video_length, height, width = hidden_states.size()
@@ -1660,10 +1702,53 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         temb = self.time_embedding(temb, timestep_cond)
 
         # 2. Patch embedding
+        if inpaint_latents is not None:
+            hidden_states = torch.concat([hidden_states, inpaint_latents], 1)
+        if control_latents is not None:
+            hidden_states = torch.concat([hidden_states, control_latents], 1)
+
         hidden_states = rearrange(hidden_states, "b c f h w ->(b f) c h w")
         hidden_states = self.proj(hidden_states)
         hidden_states = rearrange(hidden_states, "(b f) c h w -> b c f h w", f=video_length, h=height // self.patch_size, w=width // self.patch_size)
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
+
+        encoder_hidden_states = self.text_proj(encoder_hidden_states)
+
+        if encoder_hidden_states_t5 is not None:
+            encoder_hidden_states_t5 = self.text_proj_t5(encoder_hidden_states_t5)
+            encoder_hidden_states = torch.cat([encoder_hidden_states, encoder_hidden_states_t5], dim=1).contiguous()
+
+        if ref_latents is not None:
+            ref_batch, ref_channels, ref_video_length, ref_height, ref_width = ref_latents.shape
+            ref_latents = rearrange(ref_latents, "b c f h w ->(b f) c h w")
+            ref_latents = self.ref_proj(ref_latents)
+            ref_latents = rearrange(ref_latents, "(b f) c h w -> b c f h w", f=ref_video_length, h=ref_height // self.patch_size, w=ref_width // self.patch_size)
+            ref_latents = ref_latents.flatten(2).transpose(1, 2)
+
+            emb_size = hidden_states.size()[-1]
+            ref_pos_embedding = self.ref_pos_embedding
+            ref_pos_embedding_interpolate = ref_pos_embedding.view(1, 1, self.post_patch_height, self.post_patch_width, emb_size).permute([0, 4, 1, 2, 3])
+            ref_pos_embedding_interpolate = F.interpolate(
+                ref_pos_embedding_interpolate, size=[1, height // self.config.patch_size, width // self.config.patch_size], mode='trilinear', align_corners=False
+            )
+            ref_pos_embedding_interpolate = ref_pos_embedding_interpolate.permute([0, 2, 3, 4, 1]).view(1, -1, emb_size)
+            ref_latents = ref_latents + ref_pos_embedding_interpolate
+
+            encoder_hidden_states = ref_latents
+
+        if clip_encoder_hidden_states is not None:
+            clip_encoder_hidden_states = self.clip_proj(clip_encoder_hidden_states)
+
+            encoder_hidden_states = torch.concat([clip_encoder_hidden_states, ref_latents], dim=1)
+
+        # 3. pose embedding
+        if self.pose_encoder is not None:
+            camera_pose_hidden_states = self.pose_encoder(plucker_embedding)
+            # camera_pose_hidden_states [torch.Size([49, 320, 48, 84]), torch.Size([49, 640, 24, 42]), torch.Size([49, 1280, 12, 21]), torch.Size([49, 1280, 6, 10])]
+
+            camera_pose_hidden_states = self.pose_proj(camera_pose_hidden_states)
+
+            encoder_hidden_states = torch.concat([encoder_hidden_states, camera_pose_hidden_states], dim=1)
 
         # 4. Transformer blocks
         for i, block in enumerate(self.transformer_blocks):
@@ -1713,7 +1798,16 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         return Transformer2DModelOutput(sample=output)
 
     @classmethod
-    def from_pretrained_2d(cls, pretrained_model_path, subfolder=None, transformer_additional_kwargs={}, low_cpu_mem_usage=False, torch_dtype=torch.bfloat16):
+    def from_pretrained_2d(
+        cls,
+        pretrained_model_path,
+        subfolder=None,
+        transformer_additional_kwargs={},
+        low_cpu_mem_usage=False,
+        torch_dtype=torch.bfloat16,
+        pose_encoder=None,
+        pose_proj=None,
+    ):
         if subfolder is not None:
             pretrained_model_path = os.path.join(pretrained_model_path, subfolder)
         print(f"loaded 3D transformer's pretrained weights from {pretrained_model_path} ...")
@@ -1726,7 +1820,6 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
 
         from diffusers.utils import WEIGHTS_NAME
 
-        model = cls.from_config(config, **transformer_additional_kwargs)
         model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
         model_file_safetensors = model_file.replace(".bin", ".safetensors")
 
@@ -1742,7 +1835,6 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
                 # Instantiate model with empty weights
                 with accelerate.init_empty_weights():
                     model = cls.from_config(config, **transformer_additional_kwargs)
-
                 param_device = "cpu"
                 from safetensors.torch import load_file, safe_open
 
@@ -1757,7 +1849,6 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
                         " `low_cpu_mem_usage=False` and `device_map=None` if you want to randomly initialize"
                         " those weights or else make sure your checkpoint file is correct."
                     )
-
                 unexpected_keys = load_model_dict_into_meta(
                     model,
                     state_dict,
@@ -1765,11 +1856,9 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
                     dtype=torch_dtype,
                     model_name_or_path=pretrained_model_path,
                 )
-
                 if cls._keys_to_ignore_on_load_unexpected is not None:
                     for pat in cls._keys_to_ignore_on_load_unexpected:
                         unexpected_keys = [k for k in unexpected_keys if re.search(pat, k) is None]
-
                 if len(unexpected_keys) > 0:
                     print(f"Some weights of the model checkpoint were not used when initializing {cls.__name__}: \n {[', '.join(unexpected_keys)]}")
                 return model
@@ -1820,11 +1909,24 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         print(f"### missing keys: {len(m)}; \n### unexpected keys: {len(u)};")
         print(m)
 
+        if pose_encoder:
+            model.pose_encoder = pose_encoder
+            model.pose_proj = pose_proj
+
         params = [p.numel() if "." in n else 0 for n, p in model.named_parameters()]
         print(f"### All Parameters: {sum(params) / 1e6} M")
 
         params = [p.numel() if "attn1." in n else 0 for n, p in model.named_parameters()]
         print(f"### attn1 Parameters: {sum(params) / 1e6} M")
+
+        params = [p.numel() if "attn2." in n else 0 for n, p in model.named_parameters()]
+        print(f"### attn2 Parameters: {sum(params) / 1e6} M")
+
+        params = [p.numel() if ".norm" in n else 0 for n, p in model.named_parameters()]
+        print(f"### .norm Parameters: {sum(params) / 1e6} M")
+
+        params = [p.numel() if "ff." in n else 0 for n, p in model.named_parameters()]
+        print(f"### ff. Parameters: {sum(params) / 1e6} M")
 
         model = model.to(torch_dtype)
         return model

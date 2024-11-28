@@ -15,10 +15,10 @@ import torch
 import torchvision.transforms as transforms
 from decord import VideoReader
 from func_timeout import FunctionTimedOut, func_timeout
+from packaging import version as pver
 from PIL import Image
 from torch.utils.data import BatchSampler, Sampler
 from torch.utils.data.dataset import Dataset
-from packaging import version as pver
 
 VIDEO_READER_TIMEOUT = 20
 
@@ -143,6 +143,56 @@ class ImageVideoSampler(BatchSampler):
                 bucket = self.bucket['image']
                 yield bucket[:]
                 del bucket[:]
+
+
+class ALLDatasetsSampler(BatchSampler):
+    """A sampler wrapper for grouping images with similar aspect ratio into a same batch.
+
+    Args:
+        sampler (Sampler): Base sampler.
+        dataset (Dataset): Dataset providing data information.
+        batch_size (int): Size of mini-batch.
+        drop_last (bool): If ``True``, the sampler will drop the last batch if
+            its size would be less than ``batch_size``.
+        aspect_ratios (dict): The predefined aspect ratios.
+    """
+
+    def __init__(self, sampler: Sampler, dataset: Dataset, batch_size: int, drop_last: bool = False) -> None:
+        if not isinstance(sampler, Sampler):
+            raise TypeError('sampler should be an instance of ``Sampler``, ' f'but got {sampler}')
+        if not isinstance(batch_size, int) or batch_size <= 0:
+            raise ValueError('batch_size should be a positive integer value, ' f'but got batch_size={batch_size}')
+        self.sampler = sampler
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+
+        # buckets for each aspect ratio
+        self.bucket = {'objaverse': [], 'kubric': [], 'realestate': []}
+
+    def __iter__(self):
+        for idx in self.sampler:
+            try:
+                content_type = self.dataset[idx].get('type', 'objaverse')
+                self.bucket[content_type].append(idx)
+
+                # yield a batch of indices in the same aspect ratio group
+                if len(self.bucket['objaverse']) == self.batch_size:
+                    bucket = self.bucket['objaverse']
+                    yield bucket[:]
+                    del bucket[:]
+                elif len(self.bucket['realestate']) == self.batch_size:
+                    bucket = self.bucket['realestate']
+                    yield bucket[:]
+                    del bucket[:]
+                elif len(self.bucket['kubric']) == self.batch_size:
+                    bucket = self.bucket['kubric']
+                    yield bucket[:]
+                    del bucket[:]
+            except Exception as e:
+                # 可选：记录错误信息以便调试
+                print(f"ALLDatasetsSampler __iter__ Error processing index {idx}: {e}")
+                continue  # 跳过当前迭代，继续下一个
 
 
 @contextmanager
@@ -602,7 +652,11 @@ def get_video_from_dir(video_dir):
         ret, frame = cap.read()
         if not ret:
             break
-        whole_video.append(frame)
+
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame_pil = Image.fromarray(frame_rgb)
+
+        whole_video.append(frame_pil)
         frame_count += 1
 
     cap.release()
@@ -710,7 +764,7 @@ def ray_condition(K, c2w, H, W, device, flip_flag=None):
     rays_o = c2w[..., :3, 3]  # B, V, 3
     rays_o = rays_o[:, :, None].expand_as(rays_d)  # B, V, HW, 3
     # c2w @ dirctions
-    rays_dxo = torch.cross(rays_o, rays_d)  # B, V, HW, 3
+    rays_dxo = torch.linalg.cross(rays_o, rays_d)  # B, V, HW, 3
     plucker = torch.cat([rays_dxo, rays_d], dim=-1)
     plucker = plucker.reshape(B, c2w.shape[1], H, W, 6)  # B, V, H, W, 6
     # plucker = plucker.permute(0, 1, 4, 2, 3)
@@ -810,6 +864,7 @@ class ALLDatasets(Dataset):
         video_sample_size=[384, 672],
         video_sample_stride=4,
         video_sample_n_frames=16,
+        enable_inpaint=False,
     ):
         print(f"loading annotations from {ann_path} ...")
         if ann_path.endswith('.csv'):
@@ -836,9 +891,32 @@ class ALLDatasets(Dataset):
         self.video_sample_n_frames = video_sample_n_frames
         self.video_sample_size = tuple(video_sample_size) if not isinstance(video_sample_size, int) else (video_sample_size, video_sample_size)
 
-        self.objaverse_dataset = ObjaverseDataset(self.objaverse_dataset_list, self.data_root, self.video_sample_stride, self.video_sample_n_frames, self.video_sample_size)
-        self.realestate_dataset = RealEstateDataset(self.realestate_dataset_list, self.data_root, self.video_sample_stride, self.video_sample_n_frames, self.video_sample_size)
-        self.kubric_dataset = KubricDataset(self.kubric_dataset_list, self.data_root, self.video_sample_stride, self.video_sample_n_frames, self.video_sample_size)
+        self.enable_inpaint = enable_inpaint
+
+        self.objaverse_dataset = ObjaverseDataset(
+            self.objaverse_dataset_list,
+            self.data_root,
+            self.video_sample_stride,
+            self.video_sample_n_frames,
+            self.video_sample_size,
+            self.enable_inpaint,
+        )
+        self.realestate_dataset = RealEstateDataset(
+            self.realestate_dataset_list,
+            self.data_root,
+            self.video_sample_stride,
+            self.video_sample_n_frames,
+            self.video_sample_size,
+            self.enable_inpaint,
+        )
+        self.kubric_dataset = KubricDataset(
+            self.kubric_dataset_list,
+            self.data_root,
+            self.video_sample_stride,
+            self.video_sample_n_frames,
+            self.video_sample_size,
+            self.enable_inpaint,
+        )
 
         self.len_objaverse = len(self.objaverse_dataset)
         self.len_realestate = len(self.realestate_dataset)
@@ -865,17 +943,27 @@ class ALLDatasets(Dataset):
             sample = self.kubric_dataset[adjusted_index]
 
         sample['idx'] = idx
+        sample['text'] = ''
 
         return sample
 
 
 class ObjaverseDataset(Dataset):
-    def __init__(self, objaverse_dataset_list, data_root, video_sample_stride, video_sample_n_frames, video_sample_size):
+    def __init__(
+        self,
+        objaverse_dataset_list,
+        data_root,
+        video_sample_stride,
+        video_sample_n_frames,
+        video_sample_size,
+        enable_inpaint=False,
+    ):
         self.objaverse_dataset_list = objaverse_dataset_list
         self.data_root = data_root
         self.video_sample_stride = video_sample_stride
         self.video_sample_n_frames = video_sample_n_frames
         self.video_sample_size = video_sample_size
+        self.enable_inpaint = enable_inpaint
         self.length = len(self.objaverse_dataset_list)
 
         self.video_transforms = transforms.Compose(
@@ -966,16 +1054,40 @@ class ObjaverseDataset(Dataset):
         sample["data_type"] = data_type
         sample["idx"] = idx
 
+        if self.enable_inpaint:
+            mask = get_random_mask(pixel_values_input.size())
+            mask_pixel_values = pixel_values_input * (1 - mask) + torch.ones_like(pixel_values_input) * -1 * mask
+            sample["mask_pixel_values"] = mask_pixel_values
+            sample["mask"] = mask
+
+            clip_pixel_values = sample["pixel_values_input"][0].permute(1, 2, 0).contiguous()
+            clip_pixel_values = (clip_pixel_values * 0.5 + 0.5) * 255
+            sample["clip_pixel_values"] = clip_pixel_values
+
+            ref_pixel_values = sample["pixel_values_input"][0].unsqueeze(0)
+            if (mask == 1).all():
+                ref_pixel_values = torch.ones_like(ref_pixel_values) * -1
+            sample["ref_pixel_values"] = ref_pixel_values
+
         return sample
 
 
 class RealEstateDataset(Dataset):
-    def __init__(self, realestate_dataset_list, data_root, video_sample_stride, video_sample_n_frames, video_sample_size):
+    def __init__(
+        self,
+        realestate_dataset_list,
+        data_root,
+        video_sample_stride,
+        video_sample_n_frames,
+        video_sample_size,
+        enable_inpaint=False,
+    ):
         self.realestate_dataset_list = realestate_dataset_list
         self.data_root = data_root
         self.video_sample_stride = video_sample_stride
         self.video_sample_n_frames = video_sample_n_frames
         self.video_sample_size = video_sample_size
+        self.enable_inpaint = enable_inpaint
         self.length = len(self.realestate_dataset_list)
 
         self.video_transforms = transforms.Compose(
@@ -1059,16 +1171,40 @@ class RealEstateDataset(Dataset):
         sample["data_type"] = data_type
         sample["idx"] = idx
 
+        if self.enable_inpaint:
+            mask = get_random_mask(pixel_values_input.size())
+            mask_pixel_values = pixel_values_input * (1 - mask) + torch.ones_like(pixel_values_input) * -1 * mask
+            sample["mask_pixel_values"] = mask_pixel_values
+            sample["mask"] = mask
+
+            clip_pixel_values = sample["pixel_values_input"][0].permute(1, 2, 0).contiguous()
+            clip_pixel_values = (clip_pixel_values * 0.5 + 0.5) * 255
+            sample["clip_pixel_values"] = clip_pixel_values
+
+            ref_pixel_values = sample["pixel_values_input"][0].unsqueeze(0)
+            if (mask == 1).all():
+                ref_pixel_values = torch.ones_like(ref_pixel_values) * -1
+            sample["ref_pixel_values"] = ref_pixel_values
+
         return sample
 
 
 class KubricDataset(Dataset):
-    def __init__(self, objaverse_dataset_list, data_root, video_sample_stride, video_sample_n_frames, video_sample_size):
+    def __init__(
+        self,
+        objaverse_dataset_list,
+        data_root,
+        video_sample_stride,
+        video_sample_n_frames,
+        video_sample_size,
+        enable_inpaint=False,
+    ):
         self.objaverse_dataset_list = objaverse_dataset_list
         self.data_root = data_root
         self.video_sample_stride = video_sample_stride
         self.video_sample_n_frames = video_sample_n_frames
         self.video_sample_size = video_sample_size
+        self.enable_inpaint = enable_inpaint
         self.length = len(self.objaverse_dataset_list)
 
         self.video_transforms = transforms.Compose(
@@ -1158,6 +1294,21 @@ class KubricDataset(Dataset):
         sample["plucker_embedding_output"] = plucker_embedding_output
         sample["data_type"] = data_type
         sample["idx"] = idx
+
+        if self.enable_inpaint:
+            mask = get_random_mask(pixel_values_input.size())
+            mask_pixel_values = pixel_values_input * (1 - mask) + torch.ones_like(pixel_values_input) * -1 * mask
+            sample["mask_pixel_values"] = mask_pixel_values
+            sample["mask"] = mask
+
+            clip_pixel_values = sample["pixel_values_input"][0].permute(1, 2, 0).contiguous()
+            clip_pixel_values = (clip_pixel_values * 0.5 + 0.5) * 255
+            sample["clip_pixel_values"] = clip_pixel_values
+
+            ref_pixel_values = sample["pixel_values_input"][0].unsqueeze(0)
+            if (mask == 1).all():
+                ref_pixel_values = torch.ones_like(ref_pixel_values) * -1
+            sample["ref_pixel_values"] = ref_pixel_values
 
         return sample
 
