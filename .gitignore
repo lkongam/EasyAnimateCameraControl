@@ -3,7 +3,7 @@ models/
 output*
 samples*
 datasets*
-asset*
+# asset*
 _*
 __pycache__/
 *.py[cod]
