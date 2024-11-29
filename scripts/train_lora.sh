@@ -6,7 +6,7 @@ export NCCL_P2P_DISABLE=1
 NCCL_DEBUG=INFO
 
 # When train model with multi machines, use "--config_file accelerate.yaml" instead of "--mixed_precision='bf16'".
-accelerate launch --mixed_precision="bf16" scripts/train_lora.py \
+accelerate launch --use_deepspeed --deepspeed_config_file config/zero_stage2_config.json --deepspeed_multinode_launcher standard scripts/train_lora.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --train_data_dir=$DATASET_NAME \
   --train_data_meta=$DATASET_META_NAME \
@@ -36,5 +36,6 @@ accelerate launch --mixed_precision="bf16" scripts/train_lora.py \
   --training_with_video_token_length \
   --not_sigma_loss \
   --enable_bucket \
+  --use_deepspeed \
   --uniform_sampling \
   --train_mode="inpaint"

@@ -1,5 +1,6 @@
 """Modified from https://github.com/huggingface/diffusers/blob/main/examples/text_to_image/train_text_to_image.py
 """
+
 #!/usr/bin/env python
 # coding=utf-8
 # Copyright 2024 The HuggingFace Inc. team. All rights reserved.
@@ -51,9 +52,7 @@ from torch.utils.data import RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 from tqdm.auto import tqdm
-from transformers import (BertModel, BertTokenizer, CLIPImageProcessor,
-                          CLIPVisionModelWithProjection,
-                          T5EncoderModel, T5Tokenizer)
+from transformers import BertModel, BertTokenizer, CLIPImageProcessor, CLIPVisionModelWithProjection, T5EncoderModel, T5Tokenizer
 from transformers.utils import ContextManagers
 
 import datasets
@@ -63,43 +62,39 @@ project_roots = [os.path.dirname(current_file_path), os.path.dirname(os.path.dir
 for project_root in project_roots:
     sys.path.insert(0, project_root) if project_root not in sys.path else None
 
-from transformers import (CLIPImageProcessor, CLIPVisionModelWithProjection,
-                          T5EncoderModel, T5Tokenizer)
+from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection, T5EncoderModel, T5Tokenizer
 from transformers.utils import ContextManagers
 
-from easyanimate.data.bucket_sampler import (ASPECT_RATIO_512,
-                                             ASPECT_RATIO_RANDOM_CROP_512,
-                                             ASPECT_RATIO_RANDOM_CROP_PROB,
-                                             AspectRatioBatchImageSampler,
-                                             AspectRatioBatchImageVideoSampler,
-                                             AspectRatioBatchSampler,
-                                             RandomSampler, get_closest_ratio)
+from easyanimate.data.bucket_sampler import (
+    ASPECT_RATIO_512,
+    ASPECT_RATIO_RANDOM_CROP_512,
+    ASPECT_RATIO_RANDOM_CROP_PROB,
+    AspectRatioBatchImageSampler,
+    AspectRatioBatchImageVideoSampler,
+    AspectRatioBatchSampler,
+    RandomSampler,
+    get_closest_ratio,
+)
 from easyanimate.data.dataset_image import CC15M
-from easyanimate.data.dataset_image_video import (ImageVideoDataset,
-                                                  ImageVideoSampler,
-                                                  get_random_mask)
+from easyanimate.data.dataset_image_video import ImageVideoDataset, ImageVideoSampler, get_random_mask
 from easyanimate.data.dataset_video import VideoDataset, WebVid10M
-from easyanimate.models import (name_to_autoencoder_magvit,
-                                name_to_transformer3d)
+from easyanimate.models import name_to_autoencoder_magvit, name_to_transformer3d
 from easyanimate.models.autoencoder_magvit import AutoencoderKLMagvit
 from easyanimate.models.transformer2d import Transformer2DModel
-from easyanimate.models.transformer3d import (HunyuanTransformer3DModel,
-                                              Transformer3DModel)
+from easyanimate.models.transformer3d import HunyuanTransformer3DModel, Transformer3DModel
 from easyanimate.pipeline.pipeline_easyanimate import EasyAnimatePipeline
-from easyanimate.pipeline.pipeline_easyanimate_inpaint import \
-    EasyAnimateInpaintPipeline
+from easyanimate.pipeline.pipeline_easyanimate_inpaint import EasyAnimateInpaintPipeline
 from easyanimate.pipeline.pipeline_easyanimate_multi_text_encoder import (
-    EasyAnimatePipeline_Multi_Text_Encoder, get_2d_rotary_pos_embed,
-    get_3d_rotary_pos_embed, get_resize_crop_region_for_grid)
-from easyanimate.pipeline.pipeline_easyanimate_multi_text_encoder_inpaint import (
-    EasyAnimatePipeline_Multi_Text_Encoder_Inpaint,
-    add_noise_to_reference_video, resize_mask)
-from easyanimate.pipeline.pipeline_pixart_magvit import \
-    PixArtAlphaMagvitPipeline
+    EasyAnimatePipeline_Multi_Text_Encoder,
+    get_2d_rotary_pos_embed,
+    get_3d_rotary_pos_embed,
+    get_resize_crop_region_for_grid,
+)
+from easyanimate.pipeline.pipeline_easyanimate_multi_text_encoder_inpaint import EasyAnimatePipeline_Multi_Text_Encoder_Inpaint, add_noise_to_reference_video, resize_mask
+from easyanimate.pipeline.pipeline_pixart_magvit import PixArtAlphaMagvitPipeline
 from easyanimate.utils import gaussian_diffusion as gd
 from easyanimate.utils.discrete_sampler import DiscreteSampling
-from easyanimate.utils.lora_utils import (create_network, merge_lora,
-                                          unmerge_lora)
+from easyanimate.utils.lora_utils import create_network, merge_lora, unmerge_lora
 from easyanimate.utils.respace import SpacedDiffusion, space_timesteps
 from easyanimate.utils.utils import get_image_to_video_latent, save_videos_grid
 
@@ -108,10 +103,12 @@ if is_wandb_available():
 
 rotary_pos_embed_cache = {}
 
+
 def _get_2d_rotary_pos_embed_cached(embed_dim, crops_coords, grid_size):
     tmp_key = (embed_dim, crops_coords, grid_size)
-    print('embed_dim=%d crops_coords=%s grid_size=%s in_cache=%d cache_size=%d' % (
-        embed_dim, crops_coords, grid_size, tmp_key in rotary_pos_embed_cache, len(rotary_pos_embed_cache)))
+    print(
+        'embed_dim=%d crops_coords=%s grid_size=%s in_cache=%d cache_size=%d' % (embed_dim, crops_coords, grid_size, tmp_key in rotary_pos_embed_cache, len(rotary_pos_embed_cache))
+    )
     if tmp_key not in rotary_pos_embed_cache:
         tmp_embed = get_2d_rotary_pos_embed(embed_dim, crops_coords, grid_size)
         tmp_embed_gpu = (tmp_embed[0].cuda(), tmp_embed[1].cuda())
@@ -121,14 +118,19 @@ def _get_2d_rotary_pos_embed_cached(embed_dim, crops_coords, grid_size):
     else:
         return rotary_pos_embed_cache[tmp_key]
 
+
 def _get_3d_rotary_pos_embed_cached(embed_dim, crops_coords, grid_size, temporal_size):
     tmp_key = (embed_dim, crops_coords, grid_size, temporal_size)
-    print('embed_dim=%d crops_coords=%s grid_size=%s in_cache=%d cache_size=%d' % (
-        embed_dim, crops_coords, grid_size, tmp_key in rotary_pos_embed_cache, len(rotary_pos_embed_cache)))
+    print(
+        'embed_dim=%d crops_coords=%s grid_size=%s in_cache=%d cache_size=%d' % (embed_dim, crops_coords, grid_size, tmp_key in rotary_pos_embed_cache, len(rotary_pos_embed_cache))
+    )
     if tmp_key not in rotary_pos_embed_cache:
         tmp_embed = get_3d_rotary_pos_embed(
-            embed_dim, crops_coords, grid_size=grid_size,
-            temporal_size=temporal_size, use_real=True,
+            embed_dim,
+            crops_coords,
+            grid_size=grid_size,
+            temporal_size=temporal_size,
+            use_real=True,
         )
         tmp_embed_gpu = (tmp_embed[0].cuda(), tmp_embed[1].cuda())
         print('\tembed_dim=%d data_size=%s' % (embed_dim, tmp_embed[0].shape))
@@ -137,16 +139,17 @@ def _get_3d_rotary_pos_embed_cached(embed_dim, crops_coords, grid_size, temporal
     else:
         return rotary_pos_embed_cache[tmp_key]
 
+
 def encode_prompt(
-    tokenizer, 
-    text_encoder, 
+    tokenizer,
+    text_encoder,
     prompt: str,
     device: torch.device,
     dtype: torch.dtype,
-    max_sequence_length = None,
-    tokenizer_max_length = 256,
-    add_special_tokens = False,
-    enable_text_attention_mask = True,
+    max_sequence_length=None,
+    tokenizer_max_length=256,
+    add_special_tokens=False,
+    enable_text_attention_mask=True,
 ):
     if max_sequence_length is None:
         max_length = min(tokenizer.model_max_length, tokenizer_max_length)
@@ -169,19 +172,18 @@ def encode_prompt(
     else:
         text_input_ids = text_inputs.input_ids
         prompt_attention_mask = text_inputs.attention_mask
-    
+
     if enable_text_attention_mask:
         prompt_embeds = text_encoder(
             text_input_ids,
             attention_mask=prompt_attention_mask,
         )[0]
     else:
-        prompt_embeds = text_encoder(
-            text_input_ids
-        )[0]
+        prompt_embeds = text_encoder(text_input_ids)[0]
     prompt_embeds = prompt_embeds.to(dtype=dtype, device=device)
     prompt_attention_mask = prompt_attention_mask.to(dtype=dtype, device=device)
     return prompt_embeds, prompt_attention_mask
+
 
 def get_random_downsample_ratio(sample_size, image_ratio=[], all_choices=False, rng=None):
     def _create_special_list(length):
@@ -193,9 +195,9 @@ def get_random_downsample_ratio(sample_size, image_ratio=[], all_choices=False, 
             other_elements_value = remaining_sum / (length - 1)
             special_list = [first_element] + [other_elements_value] * (length - 1)
             return special_list
-            
+
     if sample_size >= 1536:
-        number_list = [1, 1.25, 1.5, 2, 2.5, 3] + image_ratio 
+        number_list = [1, 1.25, 1.5, 2, 2.5, 3] + image_ratio
     elif sample_size >= 1024:
         number_list = [1, 1.25, 1.5, 2] + image_ratio
     elif sample_size >= 768:
@@ -210,38 +212,36 @@ def get_random_downsample_ratio(sample_size, image_ratio=[], all_choices=False, 
 
     number_list_prob = np.array(_create_special_list(len(number_list)))
     if rng is None:
-        return np.random.choice(number_list, p = number_list_prob)
+        return np.random.choice(number_list, p=number_list_prob)
     else:
-        return rng.choice(number_list, p = number_list_prob)
+        return rng.choice(number_list, p=number_list_prob)
+
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
 check_min_version("0.18.0.dev0")
 
 logger = get_logger(__name__, log_level="INFO")
 
+
 def log_validation(
-    vae, text_encoder, text_encoder_2, tokenizer, tokenizer_2, transformer3d, image_encoder, image_processor, network, 
-    config, args, accelerator, weight_dtype, global_step
+    vae, text_encoder, text_encoder_2, tokenizer, tokenizer_2, transformer3d, image_encoder, image_processor, network, config, args, accelerator, weight_dtype, global_step
 ):
     try:
         logger.info("Running validation... ")
 
         # Get New Transformer
-        Choosen_Transformer3DModel = name_to_transformer3d[
-            config['transformer_additional_kwargs'].get('transformer_type', 'Transformer3DModel')
-        ]
+        Choosen_Transformer3DModel = name_to_transformer3d[config['transformer_additional_kwargs'].get('transformer_type', 'Transformer3DModel')]
 
         transformer3d_val = Choosen_Transformer3DModel.from_pretrained_2d(
-            args.pretrained_model_name_or_path, subfolder="transformer",
-            transformer_additional_kwargs=OmegaConf.to_container(config['transformer_additional_kwargs'])
+            args.pretrained_model_name_or_path, subfolder="transformer", transformer_additional_kwargs=OmegaConf.to_container(config['transformer_additional_kwargs'])
         ).to(weight_dtype)
         transformer3d_val.load_state_dict(accelerator.unwrap_model(transformer3d).state_dict())
 
         if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
             if args.train_mode != "normal":
                 pipeline = EasyAnimatePipeline_Multi_Text_Encoder_Inpaint.from_pretrained(
-                    args.pretrained_model_name_or_path, 
-                    vae=accelerator.unwrap_model(vae).to(weight_dtype), 
+                    args.pretrained_model_name_or_path,
+                    vae=accelerator.unwrap_model(vae).to(weight_dtype),
                     text_encoder=accelerator.unwrap_model(text_encoder),
                     text_encoder_2=accelerator.unwrap_model(text_encoder_2),
                     tokenizer=tokenizer,
@@ -253,20 +253,20 @@ def log_validation(
                 )
             else:
                 pipeline = EasyAnimatePipeline_Multi_Text_Encoder.from_pretrained(
-                    args.pretrained_model_name_or_path, 
-                    vae=accelerator.unwrap_model(vae).to(weight_dtype), 
+                    args.pretrained_model_name_or_path,
+                    vae=accelerator.unwrap_model(vae).to(weight_dtype),
                     text_encoder=accelerator.unwrap_model(text_encoder),
                     text_encoder_2=accelerator.unwrap_model(text_encoder_2),
                     tokenizer=tokenizer,
                     tokenizer_2=tokenizer_2,
                     transformer=transformer3d_val,
-                    torch_dtype=weight_dtype
+                    torch_dtype=weight_dtype,
                 )
         else:
             if args.train_mode != "normal":
                 pipeline = EasyAnimateInpaintPipeline.from_pretrained(
-                    args.pretrained_model_name_or_path, 
-                    vae=accelerator.unwrap_model(vae).to(weight_dtype), 
+                    args.pretrained_model_name_or_path,
+                    vae=accelerator.unwrap_model(vae).to(weight_dtype),
                     text_encoder=accelerator.unwrap_model(text_encoder),
                     tokenizer=tokenizer,
                     transformer=transformer3d_val,
@@ -276,20 +276,17 @@ def log_validation(
                 )
             else:
                 pipeline = EasyAnimatePipeline.from_pretrained(
-                    args.pretrained_model_name_or_path, 
-                    vae=accelerator.unwrap_model(vae).to(weight_dtype), 
+                    args.pretrained_model_name_or_path,
+                    vae=accelerator.unwrap_model(vae).to(weight_dtype),
                     text_encoder=accelerator.unwrap_model(text_encoder),
                     tokenizer=tokenizer,
                     transformer=transformer3d_val,
-                    torch_dtype=weight_dtype
+                    torch_dtype=weight_dtype,
                 )
         pipeline = pipeline.to(accelerator.device)
-        pipeline = merge_lora(
-            pipeline, None, 1, accelerator.device, state_dict=accelerator.unwrap_model(network).state_dict(), transformer_only=True
-        )
+        pipeline = merge_lora(pipeline, None, 1, accelerator.device, state_dict=accelerator.unwrap_model(network).state_dict(), transformer_only=True)
 
-        if args.enable_xformers_memory_efficient_attention \
-            and config['transformer_additional_kwargs'].get('transformer_type', 'Transformer3DModel') == 'Transformer3DModel':
+        if args.enable_xformers_memory_efficient_attention and config['transformer_additional_kwargs'].get('transformer_type', 'Transformer3DModel') == 'Transformer3DModel':
             pipeline.enable_xformers_memory_efficient_attention()
 
         if args.seed is None:
@@ -305,58 +302,60 @@ def log_validation(
                             video_length = int((args.video_sample_n_frames - 1) // vae.mini_batch_encoder * vae.mini_batch_encoder) + 1 if args.video_sample_n_frames != 1 else 1
                         else:
                             video_length = int(args.video_sample_n_frames // vae.mini_batch_encoder * vae.mini_batch_encoder) if args.video_sample_n_frames != 1 else 1
-                        input_video, input_video_mask, clip_image = get_image_to_video_latent(None, None, video_length=video_length, sample_size=[args.video_sample_size, args.video_sample_size])
+                        input_video, input_video_mask, clip_image = get_image_to_video_latent(
+                            None, None, video_length=video_length, sample_size=[args.video_sample_size, args.video_sample_size]
+                        )
                         sample = pipeline(
-                            args.validation_prompts[i], 
-                            video_length = video_length,
-                            negative_prompt = "bad detailed",
-                            height      = args.video_sample_size,
-                            width       = args.video_sample_size,
-                            generator   = generator, 
-
-                            video        = input_video,
-                            mask_video   = input_video_mask,
-                            clip_image   = clip_image, 
+                            args.validation_prompts[i],
+                            video_length=video_length,
+                            negative_prompt="bad detailed",
+                            height=args.video_sample_size,
+                            width=args.video_sample_size,
+                            generator=generator,
+                            video=input_video,
+                            mask_video=input_video_mask,
+                            clip_image=clip_image,
                         ).videos
                         os.makedirs(os.path.join(args.output_dir, "sample"), exist_ok=True)
                         save_videos_grid(sample, os.path.join(args.output_dir, f"sample/sample-{global_step}-{i}.gif"))
 
                         video_length = 1
-                        input_video, input_video_mask, clip_image = get_image_to_video_latent(None, None, video_length=video_length, sample_size=[args.video_sample_size, args.video_sample_size])
+                        input_video, input_video_mask, clip_image = get_image_to_video_latent(
+                            None, None, video_length=video_length, sample_size=[args.video_sample_size, args.video_sample_size]
+                        )
                         sample = pipeline(
-                            args.validation_prompts[i], 
-                            video_length = 1,
-                            negative_prompt = "bad detailed",
-                            height      = args.video_sample_size,
-                            width       = args.video_sample_size,
-                            generator   = generator, 
-
-                            video        = input_video,
-                            mask_video   = input_video_mask,
-                            clip_image   = clip_image, 
+                            args.validation_prompts[i],
+                            video_length=1,
+                            negative_prompt="bad detailed",
+                            height=args.video_sample_size,
+                            width=args.video_sample_size,
+                            generator=generator,
+                            video=input_video,
+                            mask_video=input_video_mask,
+                            clip_image=clip_image,
                         ).videos
                         os.makedirs(os.path.join(args.output_dir, "sample"), exist_ok=True)
                         save_videos_grid(sample, os.path.join(args.output_dir, f"sample/sample-{global_step}-image-{i}.gif"))
                 else:
                     with torch.autocast("cuda", dtype=weight_dtype):
                         sample = pipeline(
-                            args.validation_prompts[i], 
-                            video_length = video_length,
-                            negative_prompt = "bad detailed",
-                            height      = args.video_sample_size,
-                            width       = args.video_sample_size,
-                            generator   = generator
+                            args.validation_prompts[i],
+                            video_length=video_length,
+                            negative_prompt="bad detailed",
+                            height=args.video_sample_size,
+                            width=args.video_sample_size,
+                            generator=generator,
                         ).videos
                         os.makedirs(os.path.join(args.output_dir, "sample"), exist_ok=True)
                         save_videos_grid(sample, os.path.join(args.output_dir, f"sample/sample-{global_step}-{i}.gif"))
 
                         sample = pipeline(
-                            args.validation_prompts[i], 
-                            video_length = 1,
-                            negative_prompt = "bad detailed",
-                            height      = args.video_sample_size,
-                            width       = args.video_sample_size,
-                            generator   = generator
+                            args.validation_prompts[i],
+                            video_length=1,
+                            negative_prompt="bad detailed",
+                            height=args.video_sample_size,
+                            width=args.video_sample_size,
+                            generator=generator,
                         ).videos
                         os.makedirs(os.path.join(args.output_dir, "sample"), exist_ok=True)
                         save_videos_grid(sample, os.path.join(args.output_dir, f"sample/sample-{global_step}-image-{i}.gif"))
@@ -375,6 +374,7 @@ def log_validation(
         print(f"Eval error with info {e}")
         return None
 
+
 def linear_decay(initial_value, final_value, total_steps, current_step):
     if current_step >= total_steps:
         return final_value
@@ -382,6 +382,7 @@ def linear_decay(initial_value, final_value, total_steps, current_step):
     step_size = (final_value - initial_value) / total_steps
     current_value = initial_value + step_size * current_step
     return current_value
+
 
 def generate_timestep_with_lognorm(low, high, shape, device="cpu", generator=None):
     u = torch.normal(mean=0.0, std=1.0, size=shape, device=device, generator=generator)
@@ -391,9 +392,7 @@ def generate_timestep_with_lognorm(low, high, shape, device="cpu", generator=Non
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
-    parser.add_argument(
-        "--input_perturbation", type=float, default=0, help="The scale of input perturbation. Recommended 0.1."
-    )
+    parser.add_argument("--input_perturbation", type=float, default=0, help="The scale of input perturbation. Recommended 0.1.")
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
@@ -418,26 +417,19 @@ def parse_args():
         "--train_data_dir",
         type=str,
         default=None,
-        help=(
-            "A folder containing the training data. "
-        ),
+        help=("A folder containing the training data. "),
     )
     parser.add_argument(
         "--train_data_meta",
         type=str,
         default=None,
-        help=(
-            "A csv containing the training data. "
-        ),
+        help=("A csv containing the training data. "),
     )
     parser.add_argument(
         "--max_train_samples",
         type=int,
         default=None,
-        help=(
-            "For debugging purposes or quicker training, truncate the number of training examples to this "
-            "value if set."
-        ),
+        help=("For debugging purposes or quicker training, truncate the number of training examples to this " "value if set."),
     )
     parser.add_argument(
         "--validation_prompts",
@@ -474,12 +466,8 @@ def parse_args():
         action="store_true",
         help="whether to use cuda multi-stream",
     )
-    parser.add_argument(
-        "--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader."
-    )
-    parser.add_argument(
-        "--vae_mini_batch", type=int, default=32, help="mini batch size for vae."
-    )
+    parser.add_argument("--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader.")
+    parser.add_argument("--vae_mini_batch", type=int, default=32, help="mini batch size for vae.")
     parser.add_argument("--num_train_epochs", type=int, default=100)
     parser.add_argument(
         "--max_train_steps",
@@ -514,17 +502,10 @@ def parse_args():
         "--lr_scheduler",
         type=str,
         default="constant",
-        help=(
-            'The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
-            ' "constant", "constant_with_warmup"]'
-        ),
+        help=('The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",' ' "constant", "constant_with_warmup"]'),
     )
-    parser.add_argument(
-        "--lr_warmup_steps", type=int, default=500, help="Number of steps for the warmup in the lr scheduler."
-    )
-    parser.add_argument(
-        "--use_8bit_adam", action="store_true", help="Whether or not to use 8-bit Adam from bitsandbytes."
-    )
+    parser.add_argument("--lr_warmup_steps", type=int, default=500, help="Number of steps for the warmup in the lr scheduler.")
+    parser.add_argument("--use_8bit_adam", action="store_true", help="Whether or not to use 8-bit Adam from bitsandbytes.")
     parser.add_argument(
         "--allow_tf32",
         action="store_true",
@@ -548,9 +529,7 @@ def parse_args():
         "--dataloader_num_workers",
         type=int,
         default=0,
-        help=(
-            "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
-        ),
+        help=("Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."),
     )
     parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer.")
     parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")
@@ -575,14 +554,9 @@ def parse_args():
         "--logging_dir",
         type=str,
         default="logs",
-        help=(
-            "[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
-            " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."
-        ),
+        help=("[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to" " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."),
     )
-    parser.add_argument(
-        "--report_model_info", action="store_true", help="Whether or not to report more info about model (such as norm, grad)."
-    )
+    parser.add_argument("--report_model_info", action="store_true", help="Whether or not to report more info about model (such as norm, grad).")
     parser.add_argument(
         "--mixed_precision",
         type=str,
@@ -608,10 +582,7 @@ def parse_args():
         "--checkpointing_steps",
         type=int,
         default=500,
-        help=(
-            "Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming"
-            " training using `--resume_from_checkpoint`."
-        ),
+        help=("Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming" " training using `--resume_from_checkpoint`."),
     )
     parser.add_argument(
         "--checkpoints_total_limit",
@@ -628,9 +599,7 @@ def parse_args():
             ' `--checkpointing_steps`, or `"latest"` to automatically select the last available checkpoint.'
         ),
     )
-    parser.add_argument(
-        "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
-    )
+    parser.add_argument("--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers.")
     parser.add_argument("--noise_offset", type=float, default=0, help="The scale of noise offset.")
     parser.add_argument(
         "--validation_epochs",
@@ -653,7 +622,7 @@ def parse_args():
             " more information see https://huggingface.co/docs/accelerate/v0.17.0/en/package_reference/accelerator#accelerate.Accelerator"
         ),
     )
-    
+
     parser.add_argument(
         "--rank",
         type=int,
@@ -671,48 +640,31 @@ def parse_args():
         action="store_true",
         help="Whether to train the text encoder. If set, the text encoder should be float32 precision.",
     )
+    parser.add_argument("--snr_loss", action="store_true", help="Whether or not to use snr_loss.")
+    parser.add_argument("--uniform_sampling", action="store_true", help="Whether or not to use uniform_sampling.")
+    parser.add_argument("--not_sigma_loss", action="store_true", help="Whether or not to not use sigma_loss.")
+    parser.add_argument("--enable_text_encoder_in_dataloader", action="store_true", help="Whether or not to use text encoder in dataloader.")
+    parser.add_argument("--enable_bucket", action="store_true", help="Whether enable bucket sample in datasets.")
+    parser.add_argument("--random_ratio_crop", action="store_true", help="Whether enable random ratio crop sample in datasets.")
+    parser.add_argument("--random_frame_crop", action="store_true", help="Whether enable random frame crop sample in datasets.")
+    parser.add_argument("--random_hw_adapt", action="store_true", help="Whether enable random adapt height and width in datasets.")
     parser.add_argument(
-        "--snr_loss", action="store_true", help="Whether or not to use snr_loss."
+        "--training_with_video_token_length",
+        action="store_true",
+        help="The training stage of the model in training.",
     )
+    parser.add_argument("--noise_share_in_frames", action="store_true", help="Whether enable noise share in frames.")
     parser.add_argument(
-        "--uniform_sampling", action="store_true", help="Whether or not to use uniform_sampling."
+        "--noise_share_in_frames_ratio",
+        type=float,
+        default=0.5,
+        help="Noise share ratio.",
     )
-    parser.add_argument(
-        "--not_sigma_loss", action="store_true", help="Whether or not to not use sigma_loss."
-    )
-    parser.add_argument(
-        "--enable_text_encoder_in_dataloader", action="store_true", help="Whether or not to use text encoder in dataloader."
-    )
-    parser.add_argument(
-        "--enable_bucket", action="store_true", help="Whether enable bucket sample in datasets."
-    )
-    parser.add_argument(
-        "--random_ratio_crop", action="store_true", help="Whether enable random ratio crop sample in datasets."
-    )
-    parser.add_argument(
-        "--random_frame_crop", action="store_true", help="Whether enable random frame crop sample in datasets."
-    )
-    parser.add_argument(
-        "--random_hw_adapt", action="store_true", help="Whether enable random adapt height and width in datasets."
-    )
-    parser.add_argument(
-        "--training_with_video_token_length", action="store_true", help="The training stage of the model in training.",
-    )
-    parser.add_argument(
-        "--noise_share_in_frames", action="store_true", help="Whether enable noise share in frames."
-    )
-    parser.add_argument(
-        "--noise_share_in_frames_ratio", type=float, default=0.5, help="Noise share ratio.",
-    )
-    parser.add_argument(
-        "--motion_sub_loss", action="store_true", help="Whether enable motion sub loss."
-    )
-    parser.add_argument(
-        "--motion_sub_loss_ratio", type=float, default=0.25, help="The ratio of motion sub loss."
-    )
+    parser.add_argument("--motion_sub_loss", action="store_true", help="Whether enable motion sub loss.")
+    parser.add_argument("--motion_sub_loss_ratio", type=float, default=0.25, help="The ratio of motion sub loss.")
     parser.add_argument(
         "--keep_all_node_same_token_length",
-        action="store_true", 
+        action="store_true",
         help="Reference of the length token.",
     )
     parser.add_argument(
@@ -767,9 +719,7 @@ def parse_args():
         "--config_path",
         type=str,
         default=None,
-        help=(
-            "The config of the model in training."
-        ),
+        help=("The config of the model in training."),
     )
     parser.add_argument(
         "--transformer_path",
@@ -785,42 +735,26 @@ def parse_args():
     )
     parser.add_argument("--save_state", action="store_true", help="Whether or not to save state.")
 
-    parser.add_argument(
-        '--tokenizer_max_length', 
-        type=int,
-        default=256,
-        help='Max length of tokenizer'
-    )
-    parser.add_argument(
-        "--use_deepspeed", action="store_true", help="Whether or not to use deepspeed."
-    )
-    parser.add_argument(
-        "--low_vram", action="store_true", help="Whether enable low_vram mode."
-    )
+    parser.add_argument('--tokenizer_max_length', type=int, default=256, help='Max length of tokenizer')
+    parser.add_argument("--use_deepspeed", action="store_true", help="Whether or not to use deepspeed.")
+    parser.add_argument("--low_vram", action="store_true", help="Whether enable low_vram mode.")
     parser.add_argument(
         "--train_mode",
         type=str,
         default="normal",
-        help=(
-            'The format of training data. Support `"normal"`'
-            ' (default), `"inpaint"`.'
-        ),
+        help=('The format of training data. Support `"normal"`' ' (default), `"inpaint"`.'),
     )
     parser.add_argument(
         "--abnormal_norm_clip_start",
         type=int,
         default=1000,
-        help=(
-            'When do we start doing additional processing on abnormal gradients. '
-        ),
+        help=('When do we start doing additional processing on abnormal gradients. '),
     )
     parser.add_argument(
         "--initial_grad_norm_ratio",
         type=int,
         default=5,
-        help=(
-            'The initial gradient is relative to the multiple of the max_grad_norm. '
-        ),
+        help=('The initial gradient is relative to the multiple of the max_grad_norm. '),
     )
 
     args = parser.parse_args()
@@ -848,10 +782,7 @@ def main():
         deprecate(
             "non_ema_revision!=None",
             "0.15.0",
-            message=(
-                "Downloading 'non_ema' weights from revision branches of the Hub is deprecated. Please make sure to"
-                " use `--variant=non_ema` instead."
-            ),
+            message=("Downloading 'non_ema' weights from revision branches of the Hub is deprecated. Please make sure to" " use `--variant=non_ema` instead."),
         )
     logging_dir = os.path.join(args.output_dir, args.logging_dir)
 
@@ -914,25 +845,23 @@ def main():
         noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
     else:
         train_diffusion = SpacedDiffusion(
-            use_timesteps=space_timesteps(1000, str(args.train_sampling_steps)), betas=gd.get_named_beta_schedule("linear", 1000),
-            model_mean_type=(gd.ModelMeanType.EPSILON), model_var_type=((gd.ModelVarType.LEARNED_RANGE)),
-            loss_type=gd.LossType.MSE, snr=args.snr_loss, return_startx=False,
+            use_timesteps=space_timesteps(1000, str(args.train_sampling_steps)),
+            betas=gd.get_named_beta_schedule("linear", 1000),
+            model_mean_type=(gd.ModelMeanType.EPSILON),
+            model_var_type=((gd.ModelVarType.LEARNED_RANGE)),
+            loss_type=gd.LossType.MSE,
+            snr=args.snr_loss,
+            return_startx=False,
         )
 
     if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
         print("Init BertTokenizer")
-        tokenizer = BertTokenizer.from_pretrained(
-            args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision
-        )
+        tokenizer = BertTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision)
         print("Init T5Tokenizer")
-        tokenizer_2 = T5Tokenizer.from_pretrained(
-            args.pretrained_model_name_or_path, subfolder="tokenizer_2", revision=args.revision
-        )
+        tokenizer_2 = T5Tokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer_2", revision=args.revision)
     else:
         print("Init T5Tokenizer")
-        tokenizer = T5Tokenizer.from_pretrained(
-            args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision
-        )
+        tokenizer = T5Tokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision)
         tokenizer_2 = None
 
     def deepspeed_zero_init_disabled_context_manager():
@@ -957,46 +886,33 @@ def main():
     with ContextManagers(deepspeed_zero_init_disabled_context_manager()):
         if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
             text_encoder = BertModel.from_pretrained(
-                args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision, variant=args.variant,
-                torch_dtype=weight_dtype
+                args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision, variant=args.variant, torch_dtype=weight_dtype
             )
             text_encoder_2 = T5EncoderModel.from_pretrained(
-                args.pretrained_model_name_or_path, subfolder="text_encoder_2", revision=args.revision, variant=args.variant,
-                torch_dtype=weight_dtype
+                args.pretrained_model_name_or_path, subfolder="text_encoder_2", revision=args.revision, variant=args.variant, torch_dtype=weight_dtype
             )
         else:
             text_encoder = T5EncoderModel.from_pretrained(
-                args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision, variant=args.variant,
-                torch_dtype=weight_dtype
+                args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision, variant=args.variant, torch_dtype=weight_dtype
             )
             text_encoder_2 = None
 
         # Get Vae
-        Choosen_AutoencoderKL = name_to_autoencoder_magvit[
-            config['vae_kwargs'].get('vae_type', 'AutoencoderKL')
-        ]
+        Choosen_AutoencoderKL = name_to_autoencoder_magvit[config['vae_kwargs'].get('vae_type', 'AutoencoderKL')]
         vae = Choosen_AutoencoderKL.from_pretrained(
-            args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant=args.variant,
-            vae_additional_kwargs=OmegaConf.to_container(config['vae_kwargs'])
+            args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant=args.variant, vae_additional_kwargs=OmegaConf.to_container(config['vae_kwargs'])
         )
 
     # Get Transformer
-    Choosen_Transformer3DModel = name_to_transformer3d[
-        config['transformer_additional_kwargs'].get('transformer_type', 'Transformer3DModel')
-    ]
+    Choosen_Transformer3DModel = name_to_transformer3d[config['transformer_additional_kwargs'].get('transformer_type', 'Transformer3DModel')]
     transformer3d = Choosen_Transformer3DModel.from_pretrained_2d(
-        args.pretrained_model_name_or_path, subfolder="transformer",
-        transformer_additional_kwargs=OmegaConf.to_container(config['transformer_additional_kwargs'])
+        args.pretrained_model_name_or_path, subfolder="transformer", transformer_additional_kwargs=OmegaConf.to_container(config['transformer_additional_kwargs'])
     )
 
     # Get Image encoder
     if args.train_mode != "normal" and config['transformer_additional_kwargs'].get('enable_clip_in_inpaint', True):
-        image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-            args.pretrained_model_name_or_path, subfolder="image_encoder"
-        )
-        image_processor = CLIPImageProcessor.from_pretrained(
-            args.pretrained_model_name_or_path, subfolder="image_encoder"
-        )
+        image_encoder = CLIPVisionModelWithProjection.from_pretrained(args.pretrained_model_name_or_path, subfolder="image_encoder")
+        image_processor = CLIPImageProcessor.from_pretrained(args.pretrained_model_name_or_path, subfolder="image_encoder")
     else:
         image_encoder = None
         image_processor = None
@@ -1027,6 +943,7 @@ def main():
         print(f"From checkpoint: {args.transformer_path}")
         if args.transformer_path.endswith("safetensors"):
             from safetensors.torch import load_file, safe_open
+
             state_dict = load_file(args.transformer_path)
         else:
             state_dict = torch.load(args.transformer_path, map_location="cpu")
@@ -1039,6 +956,7 @@ def main():
         print(f"From checkpoint: {args.vae_path}")
         if args.vae_path.endswith("safetensors"):
             from safetensors.torch import load_file, safe_open
+
             state_dict = load_file(args.vae_path)
         else:
             state_dict = torch.load(args.vae_path, map_location="cpu")
@@ -1047,8 +965,7 @@ def main():
         m, u = vae.load_state_dict(state_dict, strict=False)
         print(f"missing keys: {len(m)}, unexpected keys: {len(u)}")
 
-    if args.enable_xformers_memory_efficient_attention \
-        and config['transformer_additional_kwargs'].get('transformer_type', 'Transformer3DModel') == 'Transformer3DModel':
+    if args.enable_xformers_memory_efficient_attention and config['transformer_additional_kwargs'].get('transformer_type', 'Transformer3DModel') == 'Transformer3DModel':
         if is_xformers_available():
             import xformers
 
@@ -1095,27 +1012,21 @@ def main():
         torch.backends.cuda.matmul.allow_tf32 = True
 
     if args.scale_lr:
-        args.learning_rate = (
-            args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
-        )
+        args.learning_rate = args.learning_rate * args.gradient_accumulation_steps * args.train_batch_size * accelerator.num_processes
 
     # Initialize the optimizer
     if args.use_8bit_adam:
         try:
             import bitsandbytes as bnb
         except ImportError:
-            raise ImportError(
-                "Please install bitsandbytes to use 8-bit Adam. You can do so by running `pip install bitsandbytes`"
-            )
+            raise ImportError("Please install bitsandbytes to use 8-bit Adam. You can do so by running `pip install bitsandbytes`")
 
         optimizer_cls = bnb.optim.AdamW8bit
     elif args.use_came:
         try:
             from came_pytorch import CAME
         except:
-            raise ImportError(
-                "Please install came_pytorch to use CAME. You can do so by running `pip install came_pytorch`"
-            )
+            raise ImportError("Please install came_pytorch to use CAME. You can do so by running `pip install came_pytorch`")
 
         optimizer_cls = CAME
     else:
@@ -1127,12 +1038,7 @@ def main():
 
     # Init optimizer
     if args.use_came:
-        optimizer = optimizer_cls(
-            trainable_params_optim,
-            lr=args.learning_rate,
-            betas=(0.9, 0.999, 0.9999), 
-            eps=(1e-30, 1e-16)
-        )
+        optimizer = optimizer_cls(trainable_params_optim, lr=args.learning_rate, betas=(0.9, 0.999, 0.9999), eps=(1e-30, 1e-16))
     else:
         optimizer = optimizer_cls(
             trainable_params_optim,
@@ -1143,26 +1049,33 @@ def main():
         )
 
     # Get the training dataset
-    sample_n_frames_bucket_interval = vae.mini_batch_encoder if vae.quant_conv is None or vae.quant_conv.weight.ndim==5 else 4
+    sample_n_frames_bucket_interval = vae.mini_batch_encoder if vae.quant_conv is None or vae.quant_conv.weight.ndim == 5 else 4
 
     # Get the dataset
     train_dataset = ImageVideoDataset(
-        args.train_data_meta, args.train_data_dir,
-        video_sample_size=args.video_sample_size, video_sample_stride=args.video_sample_stride, video_sample_n_frames=args.video_sample_n_frames, 
-        video_repeat=args.video_repeat, 
+        args.train_data_meta,
+        args.train_data_dir,
+        video_sample_size=args.video_sample_size,
+        video_sample_stride=args.video_sample_stride,
+        video_sample_n_frames=args.video_sample_n_frames,
+        video_repeat=args.video_repeat,
         image_sample_size=args.image_sample_size,
-        enable_bucket=args.enable_bucket, enable_inpaint=True if args.train_mode != "normal" else False,
+        enable_bucket=args.enable_bucket,
+        enable_inpaint=True if args.train_mode != "normal" else False,
     )
-    
+
     if args.enable_bucket:
-        aspect_ratio_sample_size = {key : [x / 512 * args.video_sample_size for x in ASPECT_RATIO_512[key]] for key in ASPECT_RATIO_512.keys()}
+        aspect_ratio_sample_size = {key: [x / 512 * args.video_sample_size for x in ASPECT_RATIO_512[key]] for key in ASPECT_RATIO_512.keys()}
         batch_sampler_generator = torch.Generator().manual_seed(args.seed)
         batch_sampler = AspectRatioBatchImageVideoSampler(
-            sampler=RandomSampler(train_dataset, generator=batch_sampler_generator), dataset=train_dataset.dataset, 
-            batch_size=args.train_batch_size, train_folder = args.train_data_dir, drop_last=True,
+            sampler=RandomSampler(train_dataset, generator=batch_sampler_generator),
+            dataset=train_dataset.dataset,
+            batch_size=args.train_batch_size,
+            train_folder=args.train_data_dir,
+            drop_last=True,
             aspect_ratios=aspect_ratio_sample_size,
         )
-        
+
         # Get the frame length at different resolutions according to token_length
         def get_length_to_frame_num(token_length):
             if args.image_sample_size > args.video_sample_size:
@@ -1172,14 +1085,16 @@ def main():
                     sample_sizes.append(args.image_sample_size)
             else:
                 sample_sizes = [args.image_sample_size]
-            
+
             if vae.cache_mag_vae:
                 length_to_frame_num = {
-                    sample_size: min(token_length / sample_size / sample_size, args.video_sample_n_frames) // sample_n_frames_bucket_interval * sample_n_frames_bucket_interval + 1 for sample_size in sample_sizes
+                    sample_size: min(token_length / sample_size / sample_size, args.video_sample_n_frames) // sample_n_frames_bucket_interval * sample_n_frames_bucket_interval + 1
+                    for sample_size in sample_sizes
                 }
             else:
                 length_to_frame_num = {
-                    sample_size: min(token_length / sample_size / sample_size, args.video_sample_n_frames) // sample_n_frames_bucket_interval * sample_n_frames_bucket_interval for sample_size in sample_sizes
+                    sample_size: min(token_length / sample_size / sample_size, args.video_sample_n_frames) // sample_n_frames_bucket_interval * sample_n_frames_bucket_interval
+                    for sample_size in sample_sizes
                 }
 
             return length_to_frame_num
@@ -1190,10 +1105,10 @@ def main():
             length_to_frame_num = get_length_to_frame_num(target_token_length)
 
             # Create new output
-            new_examples                 = {}
+            new_examples = {}
             new_examples["target_token_length"] = target_token_length
             new_examples["pixel_values"] = []
-            new_examples["text"]         = []
+            new_examples["text"] = []
             # Used in Inpaint mode
             if args.train_mode != "normal":
                 new_examples["mask_pixel_values"] = []
@@ -1201,15 +1116,19 @@ def main():
                 new_examples["clip_pixel_values"] = []
 
             # Get downsample ratio in image and videos
-            pixel_value     = examples[0]["pixel_values"]
-            data_type       = examples[0]["data_type"]
-            f, h, w, c      = np.shape(pixel_value)
+            pixel_value = examples[0]["pixel_values"]
+            data_type = examples[0]["data_type"]
+            f, h, w, c = np.shape(pixel_value)
             if data_type == 'image':
-                random_downsample_ratio = 1 if not args.random_hw_adapt else get_random_downsample_ratio(args.image_sample_size, image_ratio=[args.image_sample_size / args.video_sample_size], rng=rng)
+                random_downsample_ratio = (
+                    1 if not args.random_hw_adapt else get_random_downsample_ratio(args.image_sample_size, image_ratio=[args.image_sample_size / args.video_sample_size], rng=rng)
+                )
 
-                aspect_ratio_sample_size = {key : [x / 512 * args.image_sample_size / random_downsample_ratio for x in ASPECT_RATIO_512[key]] for key in ASPECT_RATIO_512.keys()}
-                aspect_ratio_random_crop_sample_size = {key : [x / 512 * args.image_sample_size / random_downsample_ratio for x in ASPECT_RATIO_RANDOM_CROP_512[key]] for key in ASPECT_RATIO_RANDOM_CROP_512.keys()}
-                
+                aspect_ratio_sample_size = {key: [x / 512 * args.image_sample_size / random_downsample_ratio for x in ASPECT_RATIO_512[key]] for key in ASPECT_RATIO_512.keys()}
+                aspect_ratio_random_crop_sample_size = {
+                    key: [x / 512 * args.image_sample_size / random_downsample_ratio for x in ASPECT_RATIO_RANDOM_CROP_512[key]] for key in ASPECT_RATIO_RANDOM_CROP_512.keys()
+                }
+
                 batch_video_length = args.video_sample_n_frames + sample_n_frames_bucket_interval
             else:
                 if args.random_hw_adapt:
@@ -1226,34 +1145,31 @@ def main():
                         batch_video_length = length_to_frame_num[local_video_sample_size]
                         random_downsample_ratio = args.video_sample_size / local_video_sample_size
                     else:
-                        random_downsample_ratio = get_random_downsample_ratio(
-                                args.video_sample_size, rng=rng)
+                        random_downsample_ratio = get_random_downsample_ratio(args.video_sample_size, rng=rng)
                         batch_video_length = args.video_sample_n_frames + sample_n_frames_bucket_interval
                 else:
                     random_downsample_ratio = 1
                     batch_video_length = args.video_sample_n_frames + sample_n_frames_bucket_interval
 
-                aspect_ratio_sample_size = {key : [x / 512 * args.video_sample_size / random_downsample_ratio for x in ASPECT_RATIO_512[key]] for key in ASPECT_RATIO_512.keys()}
-                aspect_ratio_random_crop_sample_size = {key : [x / 512 * args.video_sample_size / random_downsample_ratio for x in ASPECT_RATIO_RANDOM_CROP_512[key]] for key in ASPECT_RATIO_RANDOM_CROP_512.keys()}
+                aspect_ratio_sample_size = {key: [x / 512 * args.video_sample_size / random_downsample_ratio for x in ASPECT_RATIO_512[key]] for key in ASPECT_RATIO_512.keys()}
+                aspect_ratio_random_crop_sample_size = {
+                    key: [x / 512 * args.video_sample_size / random_downsample_ratio for x in ASPECT_RATIO_RANDOM_CROP_512[key]] for key in ASPECT_RATIO_RANDOM_CROP_512.keys()
+                }
 
             closest_size, closest_ratio = get_closest_ratio(h, w, ratios=aspect_ratio_sample_size)
             closest_size = [int(x / 16) * 16 for x in closest_size]
             if args.random_ratio_crop:
                 if rng is None:
-                    random_sample_size = aspect_ratio_random_crop_sample_size[
-                        np.random.choice(list(aspect_ratio_random_crop_sample_size.keys()), p = ASPECT_RATIO_RANDOM_CROP_PROB)
-                    ]
+                    random_sample_size = aspect_ratio_random_crop_sample_size[np.random.choice(list(aspect_ratio_random_crop_sample_size.keys()), p=ASPECT_RATIO_RANDOM_CROP_PROB)]
                 else:
-                    random_sample_size = aspect_ratio_random_crop_sample_size[
-                        rng.choice(list(aspect_ratio_random_crop_sample_size.keys()), p = ASPECT_RATIO_RANDOM_CROP_PROB)
-                    ]
+                    random_sample_size = aspect_ratio_random_crop_sample_size[rng.choice(list(aspect_ratio_random_crop_sample_size.keys()), p=ASPECT_RATIO_RANDOM_CROP_PROB)]
                 random_sample_size = [int(x / 16) * 16 for x in random_sample_size]
 
             for example in examples:
                 if args.random_ratio_crop:
                     # To 0~1
                     pixel_values = torch.from_numpy(example["pixel_values"]).permute(0, 3, 1, 2).contiguous()
-                    pixel_values = pixel_values / 255.
+                    pixel_values = pixel_values / 255.0
 
                     # Get adapt hw for resize
                     b, c, h, w = pixel_values.size()
@@ -1264,16 +1180,18 @@ def main():
                     else:
                         nw = int(tw)
                         nh = int(h / w * nw)
-                    
-                    transform = transforms.Compose([
-                        transforms.Resize([nh, nw]),
-                        transforms.CenterCrop([int(x) for x in random_sample_size]),
-                        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
-                    ])
+
+                    transform = transforms.Compose(
+                        [
+                            transforms.Resize([nh, nw]),
+                            transforms.CenterCrop([int(x) for x in random_sample_size]),
+                            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
+                        ]
+                    )
                 else:
                     # To 0~1
                     pixel_values = torch.from_numpy(example["pixel_values"]).permute(0, 3, 1, 2).contiguous()
-                    pixel_values = pixel_values / 255.
+                    pixel_values = pixel_values / 255.0
 
                     # Get adapt hw for resize
                     closest_size = list(map(lambda x: int(x), closest_size))
@@ -1281,12 +1199,14 @@ def main():
                         resize_size = closest_size[0], int(w * closest_size[0] / h)
                     else:
                         resize_size = int(h * closest_size[1] / w), closest_size[1]
-                    
-                    transform = transforms.Compose([
-                        transforms.Resize(resize_size, interpolation=transforms.InterpolationMode.BILINEAR),  # Image.BICUBIC
-                        transforms.CenterCrop(closest_size),
-                        transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
-                    ])
+
+                    transform = transforms.Compose(
+                        [
+                            transforms.Resize(resize_size, interpolation=transforms.InterpolationMode.BILINEAR),  # Image.BICUBIC
+                            transforms.CenterCrop(closest_size),
+                            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True),
+                        ]
+                    )
                 new_examples["pixel_values"].append(transform(pixel_values))
                 new_examples["text"].append(example["text"])
 
@@ -1295,14 +1215,14 @@ def main():
                     batch_video_length = int(
                         min(
                             batch_video_length,
-                            (len(pixel_values) - 1) // sample_n_frames_bucket_interval * sample_n_frames_bucket_interval + 1, 
+                            (len(pixel_values) - 1) // sample_n_frames_bucket_interval * sample_n_frames_bucket_interval + 1,
                         )
                     )
                 else:
                     batch_video_length = int(
                         min(
                             batch_video_length,
-                            len(pixel_values) // sample_n_frames_bucket_interval * sample_n_frames_bucket_interval, 
+                            len(pixel_values) // sample_n_frames_bucket_interval * sample_n_frames_bucket_interval,
                         )
                     )
                 if batch_video_length == 0:
@@ -1327,7 +1247,7 @@ def main():
                     clip_pixel_values = new_examples["pixel_values"][-1][clip_index].permute(1, 2, 0).contiguous()
                     clip_pixel_values = (clip_pixel_values * 0.5 + 0.5) * 255
                     new_examples["clip_pixel_values"].append(clip_pixel_values)
-  
+
             # Limit the number of frames to the same
             new_examples["pixel_values"] = torch.stack([example[:batch_video_length] for example in new_examples["pixel_values"]])
             if args.train_mode != "normal":
@@ -1338,35 +1258,44 @@ def main():
             # Encode prompts when enable_text_encoder_in_dataloader=True
             if args.enable_text_encoder_in_dataloader:
                 if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
-                    prompt_embeds, prompt_attention_mask = \
-                        encode_prompt(
-                            tokenizer, text_encoder, new_examples['text'], None, 
-                            tokenizer_max_length=args.tokenizer_max_length, dtype=weight_dtype,
-                            enable_text_attention_mask=transformer3d.config.get("enable_text_attention_mask", True)
-                        )
-                    prompt_embeds_2, prompt_attention_mask_2 = \
-                        encode_prompt(
-                            tokenizer_2, text_encoder_2, new_examples['text'], None, 
-                            tokenizer_max_length=args.tokenizer_max_length, dtype=weight_dtype,
-                            enable_text_attention_mask=transformer3d.config.get("enable_text_attention_mask", True)
-                        )
+                    prompt_embeds, prompt_attention_mask = encode_prompt(
+                        tokenizer,
+                        text_encoder,
+                        new_examples['text'],
+                        None,
+                        tokenizer_max_length=args.tokenizer_max_length,
+                        dtype=weight_dtype,
+                        enable_text_attention_mask=transformer3d.config.get("enable_text_attention_mask", True),
+                    )
+                    prompt_embeds_2, prompt_attention_mask_2 = encode_prompt(
+                        tokenizer_2,
+                        text_encoder_2,
+                        new_examples['text'],
+                        None,
+                        tokenizer_max_length=args.tokenizer_max_length,
+                        dtype=weight_dtype,
+                        enable_text_attention_mask=transformer3d.config.get("enable_text_attention_mask", True),
+                    )
                     new_examples['prompt_embeds'] = prompt_embeds
                     new_examples['prompt_attention_mask'] = prompt_attention_mask
                     new_examples['prompt_embeds_2'] = prompt_embeds_2
                     new_examples['prompt_attention_mask_2'] = prompt_attention_mask_2
                 else:
-                    prompt_embeds, prompt_attention_mask = \
-                        encode_prompt(
-                            tokenizer, text_encoder, new_examples['text'], None, 
-                            tokenizer_max_length=args.tokenizer_max_length, dtype=weight_dtype,
-                                    add_special_tokens=True,
-                            enable_text_attention_mask=transformer3d.config.get("enable_text_attention_mask", True)
-                        )
+                    prompt_embeds, prompt_attention_mask = encode_prompt(
+                        tokenizer,
+                        text_encoder,
+                        new_examples['text'],
+                        None,
+                        tokenizer_max_length=args.tokenizer_max_length,
+                        dtype=weight_dtype,
+                        add_special_tokens=True,
+                        enable_text_attention_mask=transformer3d.config.get("enable_text_attention_mask", True),
+                    )
                     new_examples['prompt_embeds'] = prompt_embeds
                     new_examples['prompt_attention_mask'] = prompt_attention_mask
 
             return new_examples
-        
+
         # DataLoaders creation:
         train_dataloader = torch.utils.data.DataLoader(
             train_dataset,
@@ -1381,7 +1310,7 @@ def main():
         batch_sampler = ImageVideoSampler(RandomSampler(train_dataset, generator=batch_sampler_generator), train_dataset, args.train_batch_size)
         train_dataloader = torch.utils.data.DataLoader(
             train_dataset,
-            batch_sampler=batch_sampler, 
+            batch_sampler=batch_sampler,
             persistent_workers=True if args.dataloader_num_workers != 0 else False,
             num_workers=args.dataloader_num_workers,
         )
@@ -1401,9 +1330,7 @@ def main():
     )
 
     # Prepare everything with our `accelerator`.
-    network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        network, optimizer, train_dataloader, lr_scheduler
-    )
+    network, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(network, optimizer, train_dataloader, lr_scheduler)
 
     # Move text_encode and vae to gpu and cast to weight_dtype
     vae.to(accelerator.device, dtype=weight_dtype)
@@ -1460,9 +1387,7 @@ def main():
             path = dirs[-1] if len(dirs) > 0 else None
 
         if path is None:
-            accelerator.print(
-                f"Checkpoint '{args.resume_from_checkpoint}' does not exist. Starting a new training run."
-            )
+            accelerator.print(f"Checkpoint '{args.resume_from_checkpoint}' does not exist. Starting a new training run.")
             args.resume_from_checkpoint = None
             initial_global_step = 0
         else:
@@ -1479,6 +1404,7 @@ def main():
             print(f"Load pkl from {pkl_path}. Get first_epoch = {first_epoch}.")
 
             from safetensors.torch import load_file, safe_open
+
             state_dict = load_file(os.path.join(os.path.join(args.output_dir, path), "lora_diffusion_pytorch_model.safetensors"))
             m, u = accelerator.unwrap_model(network).load_state_dict(state_dict, strict=False)
             print(f"missing keys: {len(m)}, unexpected keys: {len(u)}")
@@ -1520,7 +1446,7 @@ def main():
             if epoch == first_epoch and step == 0:
                 pixel_values, texts = batch['pixel_values'].cpu(), batch['text']
                 pixel_values = rearrange(pixel_values, "b f c h w -> b c f h w")
-                if pixel_values.ndim==4:
+                if pixel_values.ndim == 4:
                     pixel_values = pixel_values.unsqueeze(2)
                 os.makedirs(os.path.join(args.output_dir, "sanity_check"), exist_ok=True)
                 for idx, (pixel_value, text) in enumerate(zip(pixel_values, texts)):
@@ -1541,7 +1467,10 @@ def main():
 
                 # Increase the batch size when the length of the latent sequence of the current sample is small
                 if args.training_with_video_token_length:
-                    if args.video_sample_n_frames * args.token_sample_size * args.token_sample_size // 16 >= pixel_values.size()[1] * pixel_values.size()[3] * pixel_values.size()[4]:
+                    if (
+                        args.video_sample_n_frames * args.token_sample_size * args.token_sample_size // 16
+                        >= pixel_values.size()[1] * pixel_values.size()[3] * pixel_values.size()[4]
+                    ):
                         pixel_values = torch.tile(pixel_values, (4, 1, 1, 1, 1))
                         if args.enable_text_encoder_in_dataloader:
                             batch['prompt_embeds'] = torch.tile(batch['prompt_embeds'], (4, 1, 1))
@@ -1551,7 +1480,10 @@ def main():
                                 batch['prompt_attention_mask_2'] = torch.tile(batch['prompt_attention_mask_2'], (4, 1))
                         else:
                             batch['text'] = batch['text'] * 4
-                    elif args.video_sample_n_frames * args.token_sample_size * args.token_sample_size // 4 >= pixel_values.size()[1] * pixel_values.size()[3] * pixel_values.size()[4]:
+                    elif (
+                        args.video_sample_n_frames * args.token_sample_size * args.token_sample_size // 4
+                        >= pixel_values.size()[1] * pixel_values.size()[3] * pixel_values.size()[4]
+                    ):
                         pixel_values = torch.tile(pixel_values, (2, 1, 1, 1, 1))
                         if args.enable_text_encoder_in_dataloader:
                             batch['prompt_embeds'] = torch.tile(batch['prompt_embeds'], (2, 1, 1))
@@ -1568,17 +1500,24 @@ def main():
                     mask = batch["mask"].to(weight_dtype)
                     # Increase the batch size when the length of the latent sequence of the current sample is small
                     if args.training_with_video_token_length:
-                        if args.video_sample_n_frames * args.token_sample_size * args.token_sample_size // 16 >= pixel_values.size()[1] * pixel_values.size()[3] * pixel_values.size()[4]:
+                        if (
+                            args.video_sample_n_frames * args.token_sample_size * args.token_sample_size // 16
+                            >= pixel_values.size()[1] * pixel_values.size()[3] * pixel_values.size()[4]
+                        ):
                             clip_pixel_values = torch.tile(clip_pixel_values, (4, 1, 1, 1))
                             mask_pixel_values = torch.tile(mask_pixel_values, (4, 1, 1, 1, 1))
                             mask = torch.tile(mask, (4, 1, 1, 1, 1))
-                        elif args.video_sample_n_frames * args.token_sample_size * args.token_sample_size // 4 >= pixel_values.size()[1] * pixel_values.size()[3] * pixel_values.size()[4]:
+                        elif (
+                            args.video_sample_n_frames * args.token_sample_size * args.token_sample_size // 4
+                            >= pixel_values.size()[1] * pixel_values.size()[3] * pixel_values.size()[4]
+                        ):
                             clip_pixel_values = torch.tile(clip_pixel_values, (2, 1, 1, 1))
                             mask_pixel_values = torch.tile(mask_pixel_values, (2, 1, 1, 1, 1))
                             mask = torch.tile(mask, (2, 1, 1, 1, 1))
 
                 # Random crop number of frames to adapt different frames of video.
                 if args.random_frame_crop:
+
                     def _create_special_list(length):
                         if length == 1:
                             return [1.0]
@@ -1588,24 +1527,32 @@ def main():
                             other_elements_value = remaining_sum / (length - 1)
                             special_list = [other_elements_value] * (length - 1) + [last_element]
                             return special_list
-                        
+
                     if vae.cache_mag_vae:
-                        select_frames = [_tmp for _tmp in list(range(sample_n_frames_bucket_interval + 1, args.video_sample_n_frames + sample_n_frames_bucket_interval, sample_n_frames_bucket_interval))]
+                        select_frames = [
+                            _tmp
+                            for _tmp in list(
+                                range(sample_n_frames_bucket_interval + 1, args.video_sample_n_frames + sample_n_frames_bucket_interval, sample_n_frames_bucket_interval)
+                            )
+                        ]
                     else:
-                        select_frames = [_tmp for _tmp in list(range(sample_n_frames_bucket_interval, args.video_sample_n_frames + sample_n_frames_bucket_interval, sample_n_frames_bucket_interval))]
+                        select_frames = [
+                            _tmp
+                            for _tmp in list(range(sample_n_frames_bucket_interval, args.video_sample_n_frames + sample_n_frames_bucket_interval, sample_n_frames_bucket_interval))
+                        ]
                     select_frames_prob = np.array(_create_special_list(len(select_frames)))
-                    
+
                     if rng is None:
-                        temp_n_frames = np.random.choice(select_frames, p = select_frames_prob)
+                        temp_n_frames = np.random.choice(select_frames, p=select_frames_prob)
                     else:
-                        temp_n_frames = rng.choice(select_frames, p = select_frames_prob)
+                        temp_n_frames = rng.choice(select_frames, p=select_frames_prob)
 
                     pixel_values = pixel_values[:, :temp_n_frames, :, :]
 
                     if args.train_mode != "normal":
                         mask_pixel_values = mask_pixel_values[:, :temp_n_frames, :, :]
                         mask = mask[:, :temp_n_frames, :, :]
-                    
+
                 # Keep all node same token length to accelerate the traning when resolution grows.
                 if args.keep_all_node_same_token_length:
                     if args.token_sample_size > 256:
@@ -1615,17 +1562,19 @@ def main():
                             numbers_list.append(args.token_sample_size)
                     else:
                         numbers_list = [256]
-                    numbers_list = [_number * _number * args.video_sample_n_frames for _number in  numbers_list]
-            
+                    numbers_list = [_number * _number * args.video_sample_n_frames for _number in numbers_list]
+
                     actual_token_length = index_rng.choice(numbers_list)
                     if vae.cache_mag_vae:
-                        actual_video_length = (min(
-                                actual_token_length / pixel_values.size()[-1] / pixel_values.size()[-2], args.video_sample_n_frames
-                        ) - 1) // sample_n_frames_bucket_interval * sample_n_frames_bucket_interval + 1
+                        actual_video_length = (
+                            min(actual_token_length / pixel_values.size()[-1] / pixel_values.size()[-2], args.video_sample_n_frames) - 1
+                        ) // sample_n_frames_bucket_interval * sample_n_frames_bucket_interval + 1
                     else:
-                        actual_video_length = min(
-                            actual_token_length / pixel_values.size()[-1] / pixel_values.size()[-2], args.video_sample_n_frames
-                        ) // sample_n_frames_bucket_interval * sample_n_frames_bucket_interval
+                        actual_video_length = (
+                            min(actual_token_length / pixel_values.size()[-1] / pixel_values.size()[-2], args.video_sample_n_frames)
+                            // sample_n_frames_bucket_interval
+                            * sample_n_frames_bucket_interval
+                        )
                     actual_video_length = int(max(actual_video_length, 1))
 
                     pixel_values = pixel_values[:, :actual_video_length, :, :]
@@ -1658,7 +1607,7 @@ def main():
 
                     # This way is quicker when batch grows up
                     def _batch_encode_vae(pixel_values):
-                        if vae.quant_conv is None or vae.quant_conv.weight.ndim==5:
+                        if vae.quant_conv is None or vae.quant_conv.weight.ndim == 5:
                             pixel_values = rearrange(pixel_values, "b f c h w -> b c f h w")
                             bs = args.vae_mini_batch
                             new_pixel_values = []
@@ -1667,7 +1616,7 @@ def main():
                                 pixel_values_bs = vae.encode(pixel_values_bs)[0]
                                 pixel_values_bs = pixel_values_bs.sample()
                                 new_pixel_values.append(pixel_values_bs)
-                            latents = torch.cat(new_pixel_values, dim = 0)
+                            latents = torch.cat(new_pixel_values, dim=0)
                         else:
                             pixel_values = rearrange(pixel_values, "b f c h w -> (b f) c h w")
                             bs = args.vae_mini_batch
@@ -1677,10 +1626,10 @@ def main():
                                 pixel_values_bs = vae.encode(pixel_values_bs.to(dtype=weight_dtype)).latent_dist
                                 pixel_values_bs = pixel_values_bs.sample()
                                 new_pixel_values.append(pixel_values_bs)
-                            latents = torch.cat(new_pixel_values, dim = 0)
+                            latents = torch.cat(new_pixel_values, dim=0)
                             latents = rearrange(latents, "(b f) c h w -> b c f h w", f=video_length)
                         return latents
-                
+
                     # Encode latents.
                     if vae_stream_1 is not None:
                         vae_stream_1.wait_stream(torch.cuda.current_stream())
@@ -1710,7 +1659,7 @@ def main():
                         # Encode inpaint latents.
                         mask_latents = _batch_encode_vae(mask_pixel_values)
                         if vae_stream_2 is not None:
-                            torch.cuda.current_stream().wait_stream(vae_stream_2) 
+                            torch.cuda.current_stream().wait_stream(vae_stream_2)
 
                         inpaint_latents = torch.concat([mask, mask_latents], dim=1)
                         inpaint_latents = t2v_flag[:, None, None, None, None] * inpaint_latents
@@ -1733,14 +1682,18 @@ def main():
                                 bsc = clip_encoder_hidden_states.shape[0]
 
                                 if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
-                                    clip_attention_mask = torch.ones([bsc, unwrap_model(transformer3d).n_query]) if np.random.rand() < 0.50 else torch.zeros([bsc, unwrap_model(transformer3d).n_query])
+                                    clip_attention_mask = (
+                                        torch.ones([bsc, unwrap_model(transformer3d).n_query])
+                                        if np.random.rand() < 0.50
+                                        else torch.zeros([bsc, unwrap_model(transformer3d).n_query])
+                                    )
                                 else:
                                     clip_attention_mask = torch.ones([bsc, 8]) if np.random.rand() < 0.50 else torch.zeros([bsc, 8])
                                 clip_attention_mask = clip_attention_mask.to(accelerator.device, dtype=weight_dtype)
                             else:
                                 clip_encoder_hidden_states = None
                                 clip_attention_mask = None
-                        
+
                 # wait for latents = vae.encode(pixel_values) to complete
                 if vae_stream_1 is not None:
                     torch.cuda.current_stream().wait_stream(vae_stream_1)
@@ -1769,28 +1722,37 @@ def main():
                 else:
                     if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
                         with torch.no_grad():
-                            prompt_embeds, prompt_attention_mask = \
-                                encode_prompt(
-                                    tokenizer, text_encoder, batch['text'], latents.device, 
-                                    tokenizer_max_length=args.tokenizer_max_length, dtype=weight_dtype,
-                                    enable_text_attention_mask=unwrap_model(transformer3d).config.get("enable_text_attention_mask", True)
-                                )
-                            prompt_embeds_2, prompt_attention_mask_2 = \
-                                encode_prompt(
-                                    tokenizer_2, text_encoder_2, batch['text'], latents.device, 
-                                    tokenizer_max_length=args.tokenizer_max_length, dtype=weight_dtype,
-                                    enable_text_attention_mask=unwrap_model(transformer3d).config.get("enable_text_attention_mask", True)
-                                )
+                            prompt_embeds, prompt_attention_mask = encode_prompt(
+                                tokenizer,
+                                text_encoder,
+                                batch['text'],
+                                latents.device,
+                                tokenizer_max_length=args.tokenizer_max_length,
+                                dtype=weight_dtype,
+                                enable_text_attention_mask=unwrap_model(transformer3d).config.get("enable_text_attention_mask", True),
+                            )
+                            prompt_embeds_2, prompt_attention_mask_2 = encode_prompt(
+                                tokenizer_2,
+                                text_encoder_2,
+                                batch['text'],
+                                latents.device,
+                                tokenizer_max_length=args.tokenizer_max_length,
+                                dtype=weight_dtype,
+                                enable_text_attention_mask=unwrap_model(transformer3d).config.get("enable_text_attention_mask", True),
+                            )
 
                     else:
                         with torch.no_grad():
-                            prompt_embeds, prompt_attention_mask = \
-                                encode_prompt(
-                                    tokenizer, text_encoder, batch['text'], latents.device, 
-                                    tokenizer_max_length=args.tokenizer_max_length, dtype=weight_dtype,
-                                    add_special_tokens=True,
-                                    enable_text_attention_mask=unwrap_model(transformer3d).config.get("enable_text_attention_mask", True)
-                                )
+                            prompt_embeds, prompt_attention_mask = encode_prompt(
+                                tokenizer,
+                                text_encoder,
+                                batch['text'],
+                                latents.device,
+                                tokenizer_max_length=args.tokenizer_max_length,
+                                dtype=weight_dtype,
+                                add_special_tokens=True,
+                                enable_text_attention_mask=unwrap_model(transformer3d).config.get("enable_text_attention_mask", True),
+                            )
 
                             prompt_embeds_2 = None
                             prompt_attention_mask_2 = None
@@ -1805,15 +1767,17 @@ def main():
                 # Get Noise
                 bsz = latents.shape[0]
                 if args.noise_share_in_frames:
+
                     def generate_noise(bs, channel, length, height, width, ratio=0.5, generator=None, device="cuda", dtype=None):
                         noise = torch.randn(bs, channel, length, height, width, generator=generator, device=device, dtype=dtype)
                         for i in range(1, length):
                             noise[:, :, i, :, :] = ratio * noise[:, :, i - 1, :, :] + (1 - ratio) * noise[:, :, i, :, :]
                         return noise
+
                     noise = generate_noise(*latents.size(), ratio=args.noise_share_in_frames_ratio, device=latents.device, generator=torch_rng, dtype=weight_dtype)
                 else:
                     noise = torch.randn(latents.size(), device=latents.device, generator=torch_rng, dtype=weight_dtype)
-                
+
                 # Sample a random timestep for each image
                 # timesteps = generate_timestep_with_lognorm(0, args.train_sampling_steps, (bsz,), device=latents.device, generator=torch_rng)
                 # timesteps = torch.randint(0, args.train_sampling_steps, (bsz,), device=latents.device, generator=torch_rng)
@@ -1830,38 +1794,31 @@ def main():
                     if unwrap_model(transformer3d).config.get("time_position_encoding_type", "2d_rope") == "3d_rope":
                         base_size_width = 720 // 8 // unwrap_model(transformer3d).config.patch_size
                         base_size_height = 480 // 8 // unwrap_model(transformer3d).config.patch_size
-                        grid_crops_coords = get_resize_crop_region_for_grid(
-                            (grid_height, grid_width), base_size_width, base_size_height
-                        )
+                        grid_crops_coords = get_resize_crop_region_for_grid((grid_height, grid_width), base_size_width, base_size_height)
                         image_rotary_emb = _get_3d_rotary_pos_embed_cached(
                             unwrap_model(transformer3d).config.attention_head_dim,
-                            grid_crops_coords, (grid_height, grid_width), latents.size()[2],
+                            grid_crops_coords,
+                            (grid_height, grid_width),
+                            latents.size()[2],
                         )
                     else:
                         base_size = 512 // 8 // unwrap_model(transformer3d).config.patch_size
-                        grid_crops_coords = get_resize_crop_region_for_grid(
-                            (grid_height, grid_width), base_size, base_size
-                        )
-                        image_rotary_emb = _get_2d_rotary_pos_embed_cached(
-                            unwrap_model(transformer3d).config.attention_head_dim,
-                            grid_crops_coords, (grid_height, grid_width)
-                        )
+                        grid_crops_coords = get_resize_crop_region_for_grid((grid_height, grid_width), base_size, base_size)
+                        image_rotary_emb = _get_2d_rotary_pos_embed_cached(unwrap_model(transformer3d).config.attention_head_dim, grid_crops_coords, (grid_height, grid_width))
 
                     # Get other hunyuan params
                     style = torch.tensor([0], device=latents.device)
                     target_size = (height, width)
                     add_time_ids = list((1024, 1024) + target_size + (0, 0))
                     add_time_ids = torch.tensor([add_time_ids], dtype=prompt_embeds.dtype)
-                    
+
                     # To latents.device
                     prompt_embeds = prompt_embeds.to(device=latents.device)
                     prompt_attention_mask = prompt_attention_mask.to(device=latents.device)
                     if prompt_embeds_2 is not None:
                         prompt_embeds_2 = prompt_embeds_2.to(device=latents.device)
                         prompt_attention_mask_2 = prompt_attention_mask_2.to(device=latents.device)
-                    add_time_ids = add_time_ids.to(dtype=prompt_embeds.dtype, device=latents.device).repeat(
-                        bsz, 1
-                    )
+                    add_time_ids = add_time_ids.to(dtype=prompt_embeds.dtype, device=latents.device).repeat(bsz, 1)
                     style = style.to(device=latents.device).repeat(bsz)
 
                     # Add noise
@@ -1887,7 +1844,7 @@ def main():
                         inpaint_latents=inpaint_latents if args.train_mode != "normal" else None,
                         clip_encoder_hidden_states=clip_encoder_hidden_states if args.train_mode != "normal" else None,
                         clip_attention_mask=clip_attention_mask if args.train_mode != "normal" else None,
-                        return_dict=False
+                        return_dict=False,
                     )[0]
                     if noise_pred.size()[1] != vae.config.latent_channels:
                         noise_pred, _ = noise_pred.chunk(2, dim=1)
@@ -1901,6 +1858,7 @@ def main():
                         masked_loss = mse_loss * mask
                         final_loss = masked_loss.mean()
                         return final_loss
+
                     loss = custom_mse_loss(noise_pred.float(), target.float())
 
                     if args.motion_sub_loss and noise_pred.size()[2] > 2:
@@ -1919,19 +1877,19 @@ def main():
                         added_cond_kwargs = {"resolution": resolution, "aspect_ratio": aspect_ratio}
 
                     loss_term = train_diffusion.training_losses(
-                        transformer3d, 
-                        latents, 
-                        timesteps, 
+                        transformer3d,
+                        latents,
+                        timesteps,
                         noise=noise,
                         model_kwargs=dict(
-                            encoder_hidden_states=prompt_embeds, 
-                            encoder_attention_mask=prompt_attention_mask, 
-                            added_cond_kwargs=added_cond_kwargs, 
+                            encoder_hidden_states=prompt_embeds,
+                            encoder_attention_mask=prompt_attention_mask,
+                            added_cond_kwargs=added_cond_kwargs,
                             inpaint_latents=inpaint_latents if args.train_mode != "normal" else None,
                             clip_encoder_hidden_states=clip_encoder_hidden_states if args.train_mode != "normal" else None,
                             clip_attention_mask=clip_attention_mask if args.train_mode != "normal" else None,
-                            return_dict=False
-                        )
+                            return_dict=False,
+                        ),
                     )
                     loss = loss_term['loss'].mean()
 
@@ -1987,9 +1945,7 @@ def main():
                                 num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
                                 removing_checkpoints = checkpoints[0:num_to_remove]
 
-                                logger.info(
-                                    f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints"
-                                )
+                                logger.info(f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints")
                                 logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
 
                                 for removing_checkpoint in removing_checkpoints:
