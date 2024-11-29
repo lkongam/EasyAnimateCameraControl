@@ -216,7 +216,7 @@ def main():
     # ome graphics cards, such as v100, 2080ti, do not support torch.bfloat16
     weight_dtype = torch.bfloat16
     # If you want to generate from text, please set the validation_image_start = None and validation_image_end = None
-    validation_video = "asset/1.mp4"
+    validation_video = "asset/Armature|idle_anim.mp4"
     validation_camera_pose = "asset/backward.txt"
     denoise_strength = 0.70
 

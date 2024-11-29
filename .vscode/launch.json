@@ -1,0 +1,114 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python train v2v camera control w deepspeed",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "pathMappings": [
+                {
+                    "localRoot": "${workspaceFolder}",
+                    "remoteRoot": "/home/chenyang_lei/video_diffusion_models/EasyAnimateCameraControl"
+                }
+            ]
+        },
+        {
+            "name": "Python train v2v camera control wo deepspeed",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "args": [
+                "--pretrained_model_name_or_path",
+                "models/Diffusion_Transformer/EasyAnimateV5-7b-zh-CameraControl",
+                "--train_data_dir",
+                "datasets/all_datasets/",
+                "--train_data_meta",
+                "datasets/all_datasets/objaverse_realestate.json",
+                "--config_path",
+                "config/easyanimate_video_v5_magvit_camera_control.yaml",
+                "--image_sample_size",
+                "1024",
+                // "--video_sample_size",
+                // "[384, 672]",
+                "--token_sample_size",
+                "512",
+                "--video_sample_stride",
+                "3",
+                "--video_sample_n_frames",
+                "49",
+                "--train_batch_size",
+                "1",
+                "--video_repeat",
+                "1",
+                "--gradient_accumulation_steps",
+                "1",
+                "--dataloader_num_workers",
+                "0",
+                "--num_train_epochs",
+                "100",
+                "--checkpointing_steps",
+                "100",
+                "--learning_rate",
+                "2e-05",
+                "--lr_scheduler",
+                "constant_with_warmup",
+                "--lr_warmup_steps",
+                "100",
+                "--seed",
+                "42",
+                "--output_dir",
+                "output_dir",
+                "--gradient_checkpointing",
+                "--mixed_precision",
+                "bf16",
+                "--adam_weight_decay",
+                "5e-3",
+                "--adam_epsilon",
+                "1e-10",
+                "--vae_mini_batch",
+                "1",
+                "--max_grad_norm",
+                "0.05",
+                "--random_hw_adapt",
+                "--training_with_video_token_length",
+                "--not_sigma_loss",
+                // "--enable_bucket",
+                "--uniform_sampling",
+                "--low_vram",
+                "--train_mode",
+                "CameraControl",
+                "--trainable_modules",
+                "."
+            ],
+            "env": {
+                "NCCL_IB_DISABLE": "1",
+                "NCCL_P2P_DISABLE": "1",
+                "NCCL_DEBUG": "INFO",
+                "CUDA_VISIBLE_DEVICES": "0",
+                "PATH": "${env:PATH}" // 保留原始 PATH 变量
+                // 如果有其他需要的环境变量，可以在这里继续添加
+            },
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        },
+        {
+            "name": "Python 调试程序: 当前文件",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "1"
+            },
+            "justMyCode": true
+        }
+    ]
+}
