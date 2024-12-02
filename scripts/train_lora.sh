@@ -1,6 +1,6 @@
-export MODEL_NAME="models/Diffusion_Transformer/EasyAnimateV5-12b-zh-InP"
-export DATASET_NAME="datasets/internal_datasets/"
-export DATASET_META_NAME="datasets/internal_datasets/metadata.json"
+export MODEL_NAME="models/Diffusion_Transformer/EasyAnimateV5-7b-zh-InP"
+export DATASET_NAME="datasets/all_datasets/"
+export DATASET_META_NAME="datasets/all_datasets/metadata.json"
 export NCCL_IB_DISABLE=1
 export NCCL_P2P_DISABLE=1
 NCCL_DEBUG=INFO
