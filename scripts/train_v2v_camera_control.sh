@@ -27,12 +27,13 @@ accelerate launch \
   --dataloader_num_workers=4 \
   --num_train_epochs=100 \
   --checkpointing_steps=34 \
+  --resume_from_checkpoint latest \
   --checkpoints_total_limit=2 \
   --learning_rate=2e-05 \
   --lr_scheduler="constant_with_warmup" \
   --lr_warmup_steps=100 \
   --seed=42 \
-  --output_dir="output_dir" \
+  --output_dir="output_dir_20241129" \
   --gradient_checkpointing \
   --mixed_precision="bf16" \
   --adam_weight_decay=5e-3 \
