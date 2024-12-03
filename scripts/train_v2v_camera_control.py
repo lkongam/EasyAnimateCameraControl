@@ -56,7 +56,7 @@ from huggingface_hub import create_repo, upload_folder
 from omegaconf import OmegaConf
 from packaging import version
 from PIL import Image
-from torch.utils.data import RandomSampler
+from torch.utils.data import RandomSampler, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 from tqdm.auto import tqdm
@@ -123,13 +123,13 @@ rotary_pos_embed_cache = {}
 
 def _get_2d_rotary_pos_embed_cached(embed_dim, crops_coords, grid_size):
     tmp_key = (embed_dim, crops_coords, grid_size)
-    print(
-        'embed_dim=%d crops_coords=%s grid_size=%s in_cache=%d cache_size=%d' % (embed_dim, crops_coords, grid_size, tmp_key in rotary_pos_embed_cache, len(rotary_pos_embed_cache))
-    )
+    # print(
+    #     'embed_dim=%d crops_coords=%s grid_size=%s in_cache=%d cache_size=%d' % (embed_dim, crops_coords, grid_size, tmp_key in rotary_pos_embed_cache, len(rotary_pos_embed_cache))
+    # )
     if tmp_key not in rotary_pos_embed_cache:
         tmp_embed = get_2d_rotary_pos_embed(embed_dim, crops_coords, grid_size)
         tmp_embed_gpu = (tmp_embed[0].cuda(), tmp_embed[1].cuda())
-        print('\tembed_dim=%d data_size=%s' % (embed_dim, tmp_embed[0].shape))
+        # print('\tembed_dim=%d data_size=%s' % (embed_dim, tmp_embed[0].shape))
         rotary_pos_embed_cache[tmp_key] = tmp_embed_gpu
         return tmp_embed_gpu
     else:
@@ -138,9 +138,9 @@ def _get_2d_rotary_pos_embed_cached(embed_dim, crops_coords, grid_size):
 
 def _get_3d_rotary_pos_embed_cached(embed_dim, crops_coords, grid_size, temporal_size):
     tmp_key = (embed_dim, crops_coords, grid_size, temporal_size)
-    print(
-        'embed_dim=%d crops_coords=%s grid_size=%s in_cache=%d cache_size=%d' % (embed_dim, crops_coords, grid_size, tmp_key in rotary_pos_embed_cache, len(rotary_pos_embed_cache))
-    )
+    # print(
+    #     'embed_dim=%d crops_coords=%s grid_size=%s in_cache=%d cache_size=%d' % (embed_dim, crops_coords, grid_size, tmp_key in rotary_pos_embed_cache, len(rotary_pos_embed_cache))
+    # )
     if tmp_key not in rotary_pos_embed_cache:
         tmp_embed = get_3d_rotary_pos_embed(
             embed_dim,
@@ -150,7 +150,7 @@ def _get_3d_rotary_pos_embed_cached(embed_dim, crops_coords, grid_size, temporal
             use_real=True,
         )
         tmp_embed_gpu = (tmp_embed[0].cuda(), tmp_embed[1].cuda())
-        print('\tembed_dim=%d data_size=%s' % (embed_dim, tmp_embed[0].shape))
+        # print('\tembed_dim=%d data_size=%s' % (embed_dim, tmp_embed[0].shape))
         rotary_pos_embed_cache[tmp_key] = tmp_embed_gpu
         return tmp_embed_gpu
     else:
@@ -895,8 +895,8 @@ def main():
                 if not args.use_deepspeed:
                     weights.pop()
 
-                with open(os.path.join(output_dir, "sampler_pos_start.pkl"), 'wb') as file:
-                    pickle.dump([batch_sampler.sampler._pos_start, first_epoch], file)
+                # with open(os.path.join(output_dir, "sampler_pos_start.pkl"), 'wb') as file:
+                #     pickle.dump([batch_sampler.sampler._pos_start, first_epoch], file)
 
         def load_model_hook(models, input_dir):
             if args.use_ema:
@@ -925,12 +925,12 @@ def main():
                 model.load_state_dict(load_model.state_dict())
                 del load_model
 
-            pkl_path = os.path.join(input_dir, "sampler_pos_start.pkl")
-            if os.path.exists(pkl_path):
-                with open(pkl_path, 'rb') as file:
-                    loaded_number, _ = pickle.load(file)
-                    batch_sampler.sampler._pos_start = max(loaded_number - args.dataloader_num_workers * accelerator.num_processes * 2, 0)
-                print(f"Load pkl from {pkl_path}. Get loaded_number = {loaded_number}.")
+            # pkl_path = os.path.join(input_dir, "sampler_pos_start.pkl")
+            # if os.path.exists(pkl_path):
+            #     with open(pkl_path, 'rb') as file:
+            #         loaded_number, _ = pickle.load(file)
+            #         batch_sampler.sampler._pos_start = max(loaded_number - args.dataloader_num_workers * accelerator.num_processes * 2, 0)
+            #     print(f"Load pkl from {pkl_path}. Get loaded_number = {loaded_number}.")
 
         accelerator.register_save_state_pre_hook(save_model_hook)
         accelerator.register_load_state_pre_hook(load_model_hook)
@@ -1259,14 +1259,24 @@ def main():
             num_workers=args.dataloader_num_workers,
         )
     else:
-        # DataLoaders creation:
-        batch_sampler_generator = torch.Generator().manual_seed(args.seed)
-        batch_sampler = ALLDatasetsSampler(RandomSampler(train_dataset, generator=batch_sampler_generator), train_dataset, args.train_batch_size)
-        train_dataloader = torch.utils.data.DataLoader(
+        # # DataLoaders creation:
+        # batch_sampler_generator = torch.Generator().manual_seed(args.seed)
+        # batch_sampler = ALLDatasetsSampler(RandomSampler(train_dataset, generator=batch_sampler_generator), train_dataset, args.train_batch_size)
+        # train_dataloader = torch.utils.data.DataLoader(
+        #     train_dataset,
+        #     batch_sampler=batch_sampler,
+        #     persistent_workers=True if args.dataloader_num_workers != 0 else False,
+        #     num_workers=args.dataloader_num_workers,
+        # )
+
+        train_dataloader = DataLoader(
             train_dataset,
-            batch_sampler=batch_sampler,
-            persistent_workers=True if args.dataloader_num_workers != 0 else False,
+            batch_size=args.train_batch_size,
+            shuffle=True,
             num_workers=args.dataloader_num_workers,
+            pin_memory=True,
+            persistent_workers=(args.dataloader_num_workers > 0),
+            drop_last=True,
         )
 
     # Scheduler and math around the number of training steps.
@@ -1389,7 +1399,10 @@ def main():
         # if epoch >= first_epoch + 1:
         #     breakpoint()
         train_loss = 0.0
-        batch_sampler.sampler.generator = torch.Generator().manual_seed(args.seed + epoch)
+        # batch_sampler.sampler.generator = torch.Generator().manual_seed(args.seed + epoch)
+        if hasattr(train_dataloader, 'sampler') and isinstance(train_dataloader.sampler, torch.utils.data.DistributedSampler):
+            train_dataloader.sampler.set_epoch(epoch)
+
         for step, batch in enumerate(train_dataloader):
             # print("run into for step, batch in enumerate(train_dataloader) ----------")
             # Data batch sanity check
@@ -1864,18 +1877,6 @@ def main():
                         return final_loss
 
                     loss = custom_mse_loss(noise_pred.float(), target.float())
-
-                    if accelerator.is_main_process:
-                        if global_step % (len(train_dataloader) - 1) == 0 or global_step == 0:
-                            with torch.no_grad():
-                                output_latents = noise_scheduler.step(noise_pred, timesteps, noisy_latents)[0]
-                                video_predict_output = decode_latents(output_latents.to(weight_dtype), vae)
-                                video_predict_output = torch.from_numpy(video_predict_output)
-                                video_target = decode_latents(latents_output, vae)
-                                video_target = torch.from_numpy(video_target)
-                                save_videos_grid(video_predict_output, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_predict_output.gif"))
-                                save_videos_grid(video_target, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_target.gif"))
-
                     # loss = custom_mse_loss(output_latents.float(), latents_output.float())
 
                     if args.motion_sub_loss and noise_pred.size()[2] > 2:
@@ -1916,28 +1917,28 @@ def main():
 
                 # Backpropagate
                 accelerator.backward(loss)
-                if accelerator.sync_gradients:
-                    if not args.use_deepspeed:
-                        trainable_params_grads = [p.grad for p in trainable_params if p.grad is not None]
-                        trainable_params_total_norm = torch.norm(torch.stack([torch.norm(g.detach(), 2) for g in trainable_params_grads]), 2)
-                        max_grad_norm = linear_decay(args.max_grad_norm * args.initial_grad_norm_ratio, args.max_grad_norm, args.abnormal_norm_clip_start, global_step)
-                        if trainable_params_total_norm / max_grad_norm > 5 and global_step > args.abnormal_norm_clip_start:
-                            actual_max_grad_norm = max_grad_norm / min((trainable_params_total_norm / max_grad_norm), 10)
-                        else:
-                            actual_max_grad_norm = max_grad_norm
-                    else:
-                        actual_max_grad_norm = args.max_grad_norm
+                # if accelerator.sync_gradients:
+                # if not args.use_deepspeed:
+                #     trainable_params_grads = [p.grad for p in trainable_params if p.grad is not None]
+                #     trainable_params_total_norm = torch.norm(torch.stack([torch.norm(g.detach(), 2) for g in trainable_params_grads]), 2)
+                #     max_grad_norm = linear_decay(args.max_grad_norm * args.initial_grad_norm_ratio, args.max_grad_norm, args.abnormal_norm_clip_start, global_step)
+                #     if trainable_params_total_norm / max_grad_norm > 5 and global_step > args.abnormal_norm_clip_start:
+                #         actual_max_grad_norm = max_grad_norm / min((trainable_params_total_norm / max_grad_norm), 10)
+                #     else:
+                #         actual_max_grad_norm = max_grad_norm
+                # else:
+                #     actual_max_grad_norm = args.max_grad_norm
 
-                    if not args.use_deepspeed and args.report_model_info and accelerator.is_main_process:
-                        if trainable_params_total_norm > 1 and global_step > args.abnormal_norm_clip_start:
-                            for name, param in transformer3d.named_parameters():
-                                if param.requires_grad:
-                                    writer.add_scalar(f'gradients/before_clip_norm/{name}', param.grad.norm(), global_step=global_step)
+                # if not args.use_deepspeed and args.report_model_info and accelerator.is_main_process:
+                #     if trainable_params_total_norm > 1 and global_step > args.abnormal_norm_clip_start:
+                #         for name, param in transformer3d.named_parameters():
+                #             if param.requires_grad:
+                #                 writer.add_scalar(f'gradients/before_clip_norm/{name}', param.grad.norm(), global_step=global_step)
 
-                    norm_sum = accelerator.clip_grad_norm_(trainable_params, actual_max_grad_norm)
-                    if not args.use_deepspeed and args.report_model_info and accelerator.is_main_process:
-                        writer.add_scalar(f'gradients/norm_sum', norm_sum, global_step=global_step)
-                        writer.add_scalar(f'gradients/actual_max_grad_norm', actual_max_grad_norm, global_step=global_step)
+                # norm_sum = accelerator.clip_grad_norm_(trainable_params, actual_max_grad_norm)
+                # if not args.use_deepspeed and args.report_model_info and accelerator.is_main_process:
+                #     writer.add_scalar(f'gradients/norm_sum', norm_sum, global_step=global_step)
+                #     writer.add_scalar(f'gradients/actual_max_grad_norm', actual_max_grad_norm, global_step=global_step)
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
@@ -1952,54 +1953,54 @@ def main():
                 accelerator.log({"train_loss": train_loss}, step=global_step)
                 train_loss = 0.0
 
-                if args.checkpointing_steps is not None and global_step % args.checkpointing_steps == 0:
-                    if args.use_deepspeed or accelerator.is_main_process:
-                        # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
-                        if args.checkpoints_total_limit is not None:
-                            checkpoints = os.listdir(args.output_dir)
-                            checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
-                            checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
+                # if args.checkpointing_steps is not None and global_step % args.checkpointing_steps == 0:
+                #     if args.use_deepspeed or accelerator.is_main_process:
+                #         # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
+                #         if args.checkpoints_total_limit is not None:
+                #             checkpoints = os.listdir(args.output_dir)
+                #             checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
+                #             checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
 
-                            # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
-                            if len(checkpoints) >= args.checkpoints_total_limit:
-                                num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
-                                removing_checkpoints = checkpoints[0:num_to_remove]
+                #             # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
+                #             if len(checkpoints) >= args.checkpoints_total_limit:
+                #                 num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
+                #                 removing_checkpoints = checkpoints[0:num_to_remove]
 
-                                logger.info(f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints")
-                                logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
+                #                 logger.info(f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints")
+                #                 logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
 
-                                for removing_checkpoint in removing_checkpoints:
-                                    removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
-                                    shutil.rmtree(removing_checkpoint, ignore_errors=True)
+                #                 for removing_checkpoint in removing_checkpoints:
+                #                     removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
+                #                     shutil.rmtree(removing_checkpoint, ignore_errors=True)
 
-                        save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                        accelerator.save_state(save_path)
-                        logger.info(f"Saved state to {save_path}")
+                #         save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+                #         accelerator.save_state(save_path)
+                #         logger.info(f"Saved state to {save_path}")
 
-                if accelerator.is_main_process:
-                    if args.validation_prompts is not None and global_step % args.validation_steps == 0:
-                        if args.use_ema:
-                            # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
-                            ema_transformer3d.store(transformer3d.parameters())
-                            ema_transformer3d.copy_to(transformer3d.parameters())
-                        log_validation(
-                            vae,
-                            text_encoder,
-                            text_encoder_2,
-                            tokenizer,
-                            tokenizer_2,
-                            transformer3d,
-                            image_encoder,
-                            image_processor,
-                            config,
-                            args,
-                            accelerator,
-                            weight_dtype,
-                            global_step,
-                        )
-                        if args.use_ema:
-                            # Switch back to the original transformer3d parameters.
-                            ema_transformer3d.restore(transformer3d.parameters())
+                # if accelerator.is_main_process:
+                #     if args.validation_prompts is not None and global_step % args.validation_steps == 0:
+                #         if args.use_ema:
+                #             # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
+                #             ema_transformer3d.store(transformer3d.parameters())
+                #             ema_transformer3d.copy_to(transformer3d.parameters())
+                #         log_validation(
+                #             vae,
+                #             text_encoder,
+                #             text_encoder_2,
+                #             tokenizer,
+                #             tokenizer_2,
+                #             transformer3d,
+                #             image_encoder,
+                #             image_processor,
+                #             config,
+                #             args,
+                #             accelerator,
+                #             weight_dtype,
+                #             global_step,
+                #         )
+                #         if args.use_ema:
+                #             # Switch back to the original transformer3d parameters.
+                #             ema_transformer3d.restore(transformer3d.parameters())
 
             logs = {"step_loss": loss.detach().item(), "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
@@ -2007,54 +2008,63 @@ def main():
             if global_step >= args.max_train_steps:
                 break
 
-        if accelerator.is_main_process:
-            if args.validation_prompts is not None and epoch % args.validation_epochs == 0:
-                if args.use_ema:
-                    # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
-                    ema_transformer3d.store(transformer3d.parameters())
-                    ema_transformer3d.copy_to(transformer3d.parameters())
-                log_validation(
-                    vae,
-                    text_encoder,
-                    text_encoder_2,
-                    tokenizer,
-                    tokenizer_2,
-                    transformer3d,
-                    image_encoder,
-                    image_processor,
-                    config,
-                    args,
-                    accelerator,
-                    weight_dtype,
-                    global_step,
-                )
-                if args.use_ema:
-                    # Switch back to the original transformer3d parameters.
-                    ema_transformer3d.restore(transformer3d.parameters())
+            # if accelerator.is_main_process:
+            # if args.validation_prompts is not None and epoch % args.validation_epochs == 0:
+            #     if args.use_ema:
+            #         # Store the UNet parameters temporarily and load the EMA parameters to perform inference.
+            #         ema_transformer3d.store(transformer3d.parameters())
+            #         ema_transformer3d.copy_to(transformer3d.parameters())
+            #     log_validation(
+            #         vae,
+            #         text_encoder,
+            #         text_encoder_2,
+            #         tokenizer,
+            #         tokenizer_2,
+            #         transformer3d,
+            #         image_encoder,
+            #         image_processor,
+            #         config,
+            #         args,
+            #         accelerator,
+            #         weight_dtype,
+            #         global_step,
+            #     )
+            #     if args.use_ema:
+            #         # Switch back to the original transformer3d parameters.
+            #         ema_transformer3d.restore(transformer3d.parameters())
 
-            if args.checkpointing_epochs is not None and epoch % args.checkpointing_epochs == 0:
-                if args.use_deepspeed or accelerator.is_main_process:
-                    # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
-                    if args.checkpoints_total_limit is not None:
-                        checkpoints = os.listdir(args.output_dir)
-                        checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
-                        checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
+        if args.checkpointing_epochs is not None and epoch % args.checkpointing_epochs == 0:
+            if args.use_deepspeed or accelerator.is_main_process:
+                # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
+                if args.checkpoints_total_limit is not None:
+                    checkpoints = os.listdir(args.output_dir)
+                    checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
+                    checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
 
-                        # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
-                        if len(checkpoints) >= args.checkpoints_total_limit:
-                            num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
-                            removing_checkpoints = checkpoints[0:num_to_remove]
+                    # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
+                    if len(checkpoints) >= args.checkpoints_total_limit:
+                        num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
+                        removing_checkpoints = checkpoints[0:num_to_remove]
 
-                            logger.info(f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints")
-                            logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
+                        logger.info(f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints")
+                        logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
 
-                            for removing_checkpoint in removing_checkpoints:
-                                removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
-                                shutil.rmtree(removing_checkpoint)
+                        for removing_checkpoint in removing_checkpoints:
+                            removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
+                            shutil.rmtree(removing_checkpoint)
 
-                    save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                    accelerator.save_state(save_path)
-                    logger.info(f"Saved state to {save_path}")
+                save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+                accelerator.save_state(save_path)
+                logger.info(f"Saved state to {save_path}")
+
+                with torch.no_grad():
+                    output_latents = noise_scheduler.step(noise_pred, timesteps, noisy_latents)[0]
+                    video_predict_output = decode_latents(output_latents.to(weight_dtype), vae)
+                    video_predict_output = torch.from_numpy(video_predict_output)
+                    video_target = decode_latents(latents_output, vae)
+                    video_target = torch.from_numpy(video_target)
+                    save_videos_grid(video_predict_output, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_predict_output.gif"))
+                    save_videos_grid(video_target, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_target.gif"))
 
     # Create the pipeline using the trained modules and save it.
     accelerator.wait_for_everyone()

@@ -19,6 +19,7 @@ from packaging import version as pver
 from PIL import Image
 from torch.utils.data import BatchSampler, Sampler
 from torch.utils.data.dataset import Dataset
+from typing import List, Dict, Any, Optional, Union, Tuple
 
 VIDEO_READER_TIMEOUT = 20
 
@@ -856,98 +857,6 @@ def get_pixel_value(whole_video, batch_index_input, batch_index_output, video_tr
     return pixel_values_input, pixel_values_output
 
 
-class ALLDatasets(Dataset):
-    def __init__(
-        self,
-        ann_path,
-        data_root=None,
-        video_sample_size=[384, 672],
-        video_sample_stride=4,
-        video_sample_n_frames=16,
-        enable_inpaint=False,
-    ):
-        print(f"loading annotations from {ann_path} ...")
-        if ann_path.endswith('.csv'):
-            with open(ann_path, 'r') as csvfile:
-                dataset = list(csv.DictReader(csvfile))
-        elif ann_path.endswith('.json'):
-            dataset = json.load(open(ann_path))
-
-        self.data_root = data_root
-
-        self.objaverse_dataset_list = []
-        self.realestate_dataset_list = []
-        self.kubric_dataset_list = []
-
-        for data in dataset:
-            if data.get('type') == 'objaverse':
-                self.objaverse_dataset_list.append(data)
-            elif data.get('type') == 'realestate':
-                self.realestate_dataset_list.append(data)
-            elif data.get('type') == 'kubric':
-                self.kubric_dataset_list.append(data)
-
-        self.video_sample_stride = video_sample_stride
-        self.video_sample_n_frames = video_sample_n_frames
-        self.video_sample_size = tuple(video_sample_size) if not isinstance(video_sample_size, int) else (video_sample_size, video_sample_size)
-
-        self.enable_inpaint = enable_inpaint
-
-        self.objaverse_dataset = ObjaverseDataset(
-            self.objaverse_dataset_list,
-            self.data_root,
-            self.video_sample_stride,
-            self.video_sample_n_frames,
-            self.video_sample_size,
-            self.enable_inpaint,
-        )
-        self.realestate_dataset = RealEstateDataset(
-            self.realestate_dataset_list,
-            self.data_root,
-            self.video_sample_stride,
-            self.video_sample_n_frames,
-            self.video_sample_size,
-            self.enable_inpaint,
-        )
-        self.kubric_dataset = KubricDataset(
-            self.kubric_dataset_list,
-            self.data_root,
-            self.video_sample_stride,
-            self.video_sample_n_frames,
-            self.video_sample_size,
-            self.enable_inpaint,
-        )
-
-        self.len_objaverse = len(self.objaverse_dataset)
-        self.len_realestate = len(self.realestate_dataset)
-        self.len_kubric = len(self.kubric_dataset)
-
-        self.length = self.len_objaverse + self.len_realestate + self.len_kubric
-        print(f"data scale: {self.length}")
-
-    def __len__(self):
-        return self.length
-
-    def __getitem__(self, idx):
-        if idx < 0 or idx >= self.length:
-            raise IndexError(f"Index {idx} out of range for dataset of size {self.length}")
-
-        sample = {}
-        if idx < self.len_objaverse:
-            sample = self.objaverse_dataset[idx]
-        elif idx < self.len_objaverse + self.len_realestate:
-            adjusted_index = idx - self.len_objaverse
-            sample = self.realestate_dataset[adjusted_index]
-        else:
-            adjusted_index = idx - self.len_objaverse - self.len_realestate
-            sample = self.kubric_dataset[adjusted_index]
-
-        sample['idx'] = idx
-        sample['text'] = ''
-
-        return sample
-
-
 class ObjaverseDataset(Dataset):
     def __init__(
         self,
@@ -1098,27 +1007,34 @@ class RealEstateDataset(Dataset):
         )
 
     def get_batch_index(self, length_of_video):
-        def compute_stride(num_frames, desired_stride, num_samples):
-            max_possible_stride = num_frames // num_samples
-            if max_possible_stride == 0:
-                return 1  # 最小步长为1
-            return min(desired_stride, max_possible_stride)
+        if length_of_video >= self.video_sample_n_frames:
 
-        # 计算输入和输出部分的步长
-        stride = compute_stride(length_of_video, self.video_sample_stride, self.video_sample_n_frames)
+            def compute_stride(num_frames, desired_stride, num_samples):
+                max_possible_stride = num_frames // num_samples
+                if max_possible_stride == 0:
+                    return 1  # 最小步长为1
+                return min(desired_stride, max_possible_stride)
 
-        def get_indices(start, num_frames, stride, total_length):
-            indices = [start + i * stride for i in range(num_frames)]
-            # 确保索引不超过总长度
-            if indices[-1] >= total_length:
-                # 如果最后一个索引超出范围，调整起始点
-                start = total_length - (num_frames * stride)
-                start = max(start, 0)
+            # 计算输入和输出部分的步长
+            stride = compute_stride(length_of_video, self.video_sample_stride, self.video_sample_n_frames)
+
+            def get_indices(start, num_frames, stride, total_length):
                 indices = [start + i * stride for i in range(num_frames)]
-            return indices
+                # 确保索引不超过总长度
+                if indices[-1] >= total_length:
+                    # 如果最后一个索引超出范围，调整起始点
+                    start = total_length - (num_frames * stride)
+                    start = max(start, 0)
+                    indices = [start + i * stride for i in range(num_frames)]
+                return indices
 
-        # 获取输入部分的帧索引
-        batch_index_output = get_indices(start=0, num_frames=self.video_sample_n_frames, stride=stride, total_length=length_of_video)
+            # 获取输入部分的帧索引
+            batch_index_output = get_indices(start=0, num_frames=self.video_sample_n_frames, stride=stride, total_length=length_of_video)
+        else:
+            # 当视频长度小于样本帧数时，均匀重复帧
+            interval = length_of_video / self.video_sample_n_frames
+            batch_index_output = [min(int(i * interval), length_of_video - 1) for i in range(self.video_sample_n_frames)]
+
         batch_index_input = [batch_index_output[0]] * self.video_sample_n_frames
 
         return batch_index_input, batch_index_output
@@ -1311,6 +1227,105 @@ class KubricDataset(Dataset):
             # sample["ref_pixel_values"] = ref_pixel_values
 
         return sample
+
+
+class ALLDatasets(Dataset):
+
+    DATASET_CLASSES = {
+        'objaverse': ObjaverseDataset,
+        'realestate': RealEstateDataset,
+        'kubric': KubricDataset,
+    }
+
+    def __init__(
+        self,
+        ann_path,
+        data_root=None,
+        video_sample_size=[384, 672],
+        video_sample_stride=4,
+        video_sample_n_frames=16,
+        enable_inpaint=False,
+    ):
+        print(f"loading annotations from {ann_path} ...")
+        dataset = self._load_annotations(ann_path)
+        self.data_root = data_root
+
+        self.video_sample_stride = video_sample_stride
+        self.video_sample_n_frames = video_sample_n_frames
+        self.video_sample_size = tuple(video_sample_size) if not isinstance(video_sample_size, int) else (video_sample_size, video_sample_size)
+        self.enable_inpaint = enable_inpaint
+
+        # 按类型分组数据
+        self.dataset_lists = self._split_datasets_by_type(dataset)
+
+        # 初始化各子数据集
+        self.sub_datasets = {}
+        total_length = 0
+        for dtype, dlist in self.dataset_lists.items():
+            dataset_class = self.DATASET_CLASSES.get(dtype)
+            if not dataset_class:
+                print(f"Unsupported dataset type: {dtype}. Skipping.")
+                continue
+            self.sub_datasets[dtype] = dataset_class(
+                dlist,
+                self.data_root,
+                self.video_sample_stride,
+                self.video_sample_n_frames,
+                self.video_sample_size,
+                self.enable_inpaint,
+            )
+            total_length += len(self.sub_datasets[dtype])
+            print(f"Loaded {len(self.sub_datasets[dtype])} samples for type '{dtype}'.")
+
+        self.length = total_length
+        print(f"Total data scale: {self.length}")
+
+    def _load_annotations(self, ann_path: str) -> List[Dict[str, Any]]:
+        """加载注释文件，支持CSV和JSON格式"""
+        try:
+            if ann_path.endswith('.csv'):
+                with open(ann_path, 'r', encoding='utf-8') as csvfile:
+                    return list(csv.DictReader(csvfile))
+            elif ann_path.endswith('.json'):
+                with open(ann_path, 'r', encoding='utf-8') as jsonfile:
+                    return json.load(jsonfile)
+            else:
+                raise ValueError(f"Unsupported annotation file format: {ann_path}")
+        except Exception as e:
+            print(f"Failed to load annotations from {ann_path}: {e}")
+            raise
+
+    def _split_datasets_by_type(self, dataset: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """按类型分组数据"""
+        dataset_lists: Dict[str, List[Dict[str, Any]]] = {dtype: [] for dtype in self.DATASET_CLASSES.keys()}
+        for data in dataset:
+            dtype = data.get('type')
+            if dtype in dataset_lists:
+                dataset_lists[dtype].append(data)
+            else:
+                print(f"Unknown dataset type '{dtype}' found in data. Skipping.")
+        return dataset_lists
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        if idx < 0 or idx >= self.length:
+            raise IndexError(f"Index {idx} out of range for dataset of size {self.length}")
+
+        # 遍历各子数据集，找到对应的样本
+        cumulative_length = 0
+        for dtype, dataset in self.sub_datasets.items():
+            if idx < cumulative_length + len(dataset):
+                sample = dataset[idx - cumulative_length]
+                sample['source_type'] = dtype  # 添加来源类型信息
+                sample['idx'] = idx
+                sample['text'] = sample.get('text', '')  # 确保'text'字段存在
+                return sample
+            cumulative_length += len(dataset)
+
+        # 如果未找到，抛出异常
+        raise IndexError(f"Index {idx} not found in any sub-dataset.")
 
 
 if __name__ == "__main__":
