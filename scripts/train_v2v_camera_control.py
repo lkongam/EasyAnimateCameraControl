@@ -2043,6 +2043,7 @@ def main():
 
                     # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
                     if len(checkpoints) >= args.checkpoints_total_limit:
+                        logger.info(f"existing checkpoints is {', '.join(checkpoints)}")
                         num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
                         removing_checkpoints = checkpoints[0:num_to_remove]
 
@@ -2051,7 +2052,7 @@ def main():
 
                         for removing_checkpoint in removing_checkpoints:
                             removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
-                            shutil.rmtree(removing_checkpoint)
+                            shutil.rmtree(removing_checkpoint, ignore_errors=True)
 
                 save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                 accelerator.save_state(save_path)
