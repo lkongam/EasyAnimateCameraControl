@@ -1416,7 +1416,7 @@ def main():
                     mask_pixel_values = rearrange(mask_pixel_values, "b f c h w -> b c f h w")
                     for idx, (clip_pixel_value, pixel_value, text) in enumerate(zip(clip_pixel_values, mask_pixel_values, texts)):
                         pixel_value = pixel_value[None, ...]
-                        Image.fromarray(np.uint8(clip_pixel_value)).save(f"{args.output_dir}/sanity_check/clip_{f'{global_step}-{idx}'}.png")
+                        # Image.fromarray(np.uint8(clip_pixel_value)).save(f"{args.output_dir}/sanity_check/clip_{f'{global_step}-{idx}'}.png")
                         save_videos_grid(pixel_value, f"{args.output_dir}/sanity_check/mask_{f'{global_step}-{idx}'}.gif", rescale=True)
 
             with accelerator.accumulate(transformer3d):
@@ -1614,7 +1614,7 @@ def main():
                         if config['transformer_additional_kwargs'].get('resize_inpaint_mask_directly', False):
                             mask = rearrange(mask, "b f c h w -> b c f h w")
                             mask = 1 - mask
-                            mask = resize_mask(mask, latents_input, vae.cache_mag_vae)
+                            mask = resize_mask(mask, latents_output, vae.cache_mag_vae)
                         else:
                             mask = torch.tile(mask, [1, 1, 3, 1, 1])
                             if vae_stream_2 is not None:
@@ -1638,31 +1638,57 @@ def main():
                         # Encode Vision CLIP latents
                         with torch.no_grad():
                             if config['transformer_additional_kwargs'].get('enable_clip_in_inpaint', True):
-                                clip_encoder_hidden_states = []
-                                for clip_pixel_value in clip_pixel_values:
-                                    image = Image.fromarray(np.uint8(clip_pixel_value.cpu().numpy()))
-                                    inputs = image_processor(images=image, return_tensors="pt")
-                                    inputs["pixel_values"] = inputs["pixel_values"].to(accelerator.device, dtype=weight_dtype)
-                                    if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
-                                        outputs = image_encoder(**inputs).last_hidden_state[0, 1:]
-                                    else:
-                                        outputs = image_encoder(**inputs).image_embeds[0]
-                                    clip_encoder_hidden_states.append(outputs)
-                                clip_encoder_hidden_states = torch.stack(clip_encoder_hidden_states)
-                                bsc = clip_encoder_hidden_states.shape[0]
+                                # clip_encoder_hidden_states = []
+                                # for clip_pixel_value in clip_pixel_values:
+                                #     image = Image.fromarray(np.uint8(clip_pixel_value.cpu().numpy()))
+                                #     inputs = image_processor(images=image, return_tensors="pt")
+                                #     inputs["pixel_values"] = inputs["pixel_values"].to(accelerator.device, dtype=weight_dtype)
+                                #     if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
+                                #         outputs = image_encoder(**inputs).last_hidden_state[0, 1:]
+                                #     else:
+                                #         outputs = image_encoder(**inputs).image_embeds[0]
+                                #     clip_encoder_hidden_states.append(outputs)
+                                # clip_encoder_hidden_states = torch.stack(clip_encoder_hidden_states)
+                                # bsc = clip_encoder_hidden_states.shape[0]
 
+                                # 假设 clip_pixel_values 的形状是 [bs, 49, 384, 672, 3]
+                                bs, num_frames, height, width, channels = clip_pixel_values.shape
+
+                                # 将 tensor 重塑为 [bs * 49, 384, 672, 3] 并转换为 NumPy 数组
+                                images_np = clip_pixel_values.view(-1, height, width, channels).cpu().numpy().astype(np.uint8)
+
+                                # 转换为 PIL 图像列表
+                                image_list = [Image.fromarray(img) for img in images_np]
+
+                                # 使用 image_processor 批量处理图像
+                                inputs = image_processor(images=image_list, return_tensors="pt")
+                                inputs["pixel_values"] = inputs["pixel_values"].to(accelerator.device, dtype=weight_dtype)
+
+                                # 批量编码图像
                                 if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
-                                    clip_attention_mask = (
-                                        torch.ones([bsc, unwrap_model(transformer3d).n_query])
-                                        if np.random.rand() < 0.50
-                                        else torch.zeros([bsc, unwrap_model(transformer3d).n_query])
-                                    )
+                                    encoder_outputs = image_encoder(**inputs).last_hidden_state[:, 1:]
                                 else:
-                                    clip_attention_mask = torch.ones([bsc, 8]) if np.random.rand() < 0.50 else torch.zeros([bsc, 8])
-                                clip_attention_mask = clip_attention_mask.to(accelerator.device, dtype=weight_dtype)
+                                    encoder_outputs = image_encoder(**inputs).image_embeds
+
+                                # encoder_outputs 形状为 [bs * 49, hidden_dim]
+                                # 将其重塑回 [bs, 49, hidden_dim]
+                                clip_encoder_hidden_states = encoder_outputs.view(bs, num_frames, -1)
+
+                                # # 获取 batch size
+                                # bsc = clip_encoder_hidden_states.shape[0]
+
+                                # if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
+                                #     clip_attention_mask = (
+                                #         torch.ones([bsc, unwrap_model(transformer3d).n_query])
+                                #         if np.random.rand() < 0.50
+                                #         else torch.zeros([bsc, unwrap_model(transformer3d).n_query])
+                                #     )
+                                # else:
+                                #     clip_attention_mask = torch.ones([bsc, 8]) if np.random.rand() < 0.50 else torch.zeros([bsc, 8])
+                                # clip_attention_mask = clip_attention_mask.to(accelerator.device, dtype=weight_dtype)
                             else:
                                 clip_encoder_hidden_states = None
-                                clip_attention_mask = None
+                                # clip_attention_mask = None
 
                 # wait for latents = vae.encode(pixel_values) to complete
                 if vae_stream_1 is not None:
@@ -1681,18 +1707,18 @@ def main():
                 if args.enable_text_encoder_in_dataloader:
                     if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
                         prompt_embeds = batch['prompt_embeds'].to(device=latents_input.device)
-                        prompt_attention_mask = batch['prompt_attention_mask'].to(device=latents_input.device)
+                        # prompt_attention_mask = batch['prompt_attention_mask'].to(device=latents_input.device)
                         prompt_embeds_2 = batch['prompt_embeds_2'].to(device=latents_input.device)
-                        prompt_attention_mask_2 = batch['prompt_attention_mask_2'].to(device=latents_input.device)
+                        # prompt_attention_mask_2 = batch['prompt_attention_mask_2'].to(device=latents_input.device)
                     else:
                         prompt_embeds = batch['prompt_embeds'].to(device=latents_input.device)
-                        prompt_attention_mask = batch['prompt_attention_mask'].to(device=latents_input.device)
+                        # prompt_attention_mask = batch['prompt_attention_mask'].to(device=latents_input.device)
                         prompt_embeds_2 = None
-                        prompt_attention_mask_2 = None
+                        # prompt_attention_mask_2 = None
                 else:
                     if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
                         with torch.no_grad():
-                            prompt_embeds, prompt_attention_mask = encode_prompt(
+                            prompt_embeds, _ = encode_prompt(
                                 tokenizer,
                                 text_encoder,
                                 batch['text'],
@@ -1701,7 +1727,7 @@ def main():
                                 dtype=weight_dtype,
                                 enable_text_attention_mask=unwrap_model(transformer3d).config.get("enable_text_attention_mask", True),
                             )
-                            prompt_embeds_2, prompt_attention_mask_2 = encode_prompt(
+                            prompt_embeds_2, _ = encode_prompt(
                                 tokenizer_2,
                                 text_encoder_2,
                                 batch['text'],
@@ -1713,7 +1739,7 @@ def main():
 
                     else:
                         with torch.no_grad():
-                            prompt_embeds, prompt_attention_mask = encode_prompt(
+                            prompt_embeds, _ = encode_prompt(
                                 tokenizer,
                                 text_encoder,
                                 batch['text'],
@@ -1725,7 +1751,7 @@ def main():
                             )
 
                             prompt_embeds_2 = None
-                            prompt_attention_mask_2 = None
+                            # prompt_attention_mask_2 = None
 
                 # Reduce the vram by offload vae and text encoders
                 if args.low_vram and not args.enable_text_encoder_in_dataloader:
@@ -1735,7 +1761,7 @@ def main():
                     torch.cuda.empty_cache()
 
                 # Get Noise
-                bsz = latents_input.shape[0]
+                bsz = latents_output.shape[0]
                 if args.noise_share_in_frames:
 
                     def generate_noise(bs, channel, length, height, width, ratio=0.5, generator=None, device="cuda", dtype=None):
@@ -1744,14 +1770,14 @@ def main():
                             noise[:, :, i, :, :] = ratio * noise[:, :, i - 1, :, :] + (1 - ratio) * noise[:, :, i, :, :]
                         return noise
 
-                    noise = generate_noise(*latents_input.size(), ratio=args.noise_share_in_frames_ratio, device=latents_input.device, generator=torch_rng, dtype=weight_dtype)
+                    noise = generate_noise(*latents_output.size(), ratio=args.noise_share_in_frames_ratio, device=latents_output.device, generator=torch_rng, dtype=weight_dtype)
                 else:
-                    noise = torch.randn(latents_input.size(), device=latents_input.device, generator=torch_rng, dtype=weight_dtype)  # torch.Size([1, 16, 13, 48, 84])
+                    noise = torch.randn(latents_output.size(), device=latents_output.device, generator=torch_rng, dtype=weight_dtype)  # torch.Size([1, 16, 13, 48, 84])
 
                 # Sample a random timestep for each image
                 # timesteps = generate_timestep_with_lognorm(0, args.train_sampling_steps, (bsz,), device=latents.device, generator=torch_rng)
                 # timesteps = torch.randint(0, args.train_sampling_steps, (bsz,), device=latents.device, generator=torch_rng)
-                timesteps = idx_sampling(bsz, generator=torch_rng, device=latents_input.device)
+                timesteps = idx_sampling(bsz, generator=torch_rng, device=latents_output.device)
                 timesteps = timesteps.long()
 
                 if args.not_sigma_loss:
@@ -1769,7 +1795,7 @@ def main():
                             unwrap_model(transformer3d).config.attention_head_dim,
                             grid_crops_coords,
                             (grid_height, grid_width),
-                            latents_input.size()[2],
+                            latents_output.size()[2],
                         )
                     else:
                         base_size = 512 // 8 // unwrap_model(transformer3d).config.patch_size
@@ -1777,25 +1803,25 @@ def main():
                         image_rotary_emb = _get_2d_rotary_pos_embed_cached(unwrap_model(transformer3d).config.attention_head_dim, grid_crops_coords, (grid_height, grid_width))
 
                     # Get other hunyuan params
-                    style = torch.tensor([0], device=latents_input.device)
-                    target_size = (height, width)
-                    add_time_ids = list((1024, 1024) + target_size + (0, 0))
-                    add_time_ids = torch.tensor([add_time_ids], dtype=prompt_embeds.dtype)
+                    # style = torch.tensor([0], device=latents_input.device)
+                    # target_size = (height, width)
+                    # add_time_ids = list((1024, 1024) + target_size + (0, 0))
+                    # add_time_ids = torch.tensor([add_time_ids], dtype=prompt_embeds.dtype)
                     # To latents.device
                     prompt_embeds = prompt_embeds.to(device=latents_input.device)
-                    prompt_attention_mask = prompt_attention_mask.to(device=latents_input.device)
+                    # prompt_attention_mask = prompt_attention_mask.to(device=latents_input.device)
                     if prompt_embeds_2 is not None:
                         prompt_embeds_2 = prompt_embeds_2.to(device=latents_input.device)
-                        prompt_attention_mask_2 = prompt_attention_mask_2.to(device=latents_input.device)
-                    add_time_ids = add_time_ids.to(dtype=prompt_embeds.dtype, device=latents_input.device).repeat(bsz, 1)
-                    style = style.to(device=latents_input.device).repeat(bsz)
+                        # prompt_attention_mask_2 = prompt_attention_mask_2.to(device=latents_input.device)
+                    # add_time_ids = add_time_ids.to(dtype=prompt_embeds.dtype, device=latents_input.device).repeat(bsz, 1)
+                    # style = style.to(device=latents_input.device).repeat(bsz)
 
                     # Add noise
-                    noisy_latents = noise_scheduler.add_noise(latents_input, noise, timesteps)
+                    noisy_latents = noise_scheduler.add_noise(latents_output, noise, timesteps)
                     if noise_scheduler.config.prediction_type == "epsilon":
                         target = noise
                     elif noise_scheduler.config.prediction_type == "v_prediction":
-                        target = noise_scheduler.get_velocity(latents_input, noise, timesteps)
+                        target = noise_scheduler.get_velocity(latents_output, noise, timesteps)
                     else:
                         raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
 
@@ -1805,32 +1831,44 @@ def main():
                         timesteps.to(noisy_latents.dtype),
                         plucker_embedding=plucker_embedding_output,
                         encoder_hidden_states=prompt_embeds,
-                        text_embedding_mask=prompt_attention_mask,
+                        # text_embedding_mask=prompt_attention_mask,
                         encoder_hidden_states_t5=prompt_embeds_2,
-                        text_embedding_mask_t5=prompt_attention_mask_2,
-                        image_meta_size=add_time_ids,
-                        style=style,
+                        # text_embedding_mask_t5=prompt_attention_mask_2,
+                        # image_meta_size=add_time_ids,
+                        # style=style,
                         image_rotary_emb=image_rotary_emb,
                         inpaint_latents=inpaint_latents if args.train_mode != "normal" else None,
                         clip_encoder_hidden_states=clip_encoder_hidden_states if args.train_mode != "normal" else None,
-                        clip_attention_mask=clip_attention_mask if args.train_mode != "normal" else None,
+                        # clip_attention_mask=clip_attention_mask if args.train_mode != "normal" else None,
                         return_dict=False,
                     )[0]
                     if noise_pred.size()[1] != vae.config.latent_channels:
                         noise_pred, _ = noise_pred.chunk(2, dim=1)
 
-                    def custom_mse_loss(output_latents, target):
+                    # def custom_mse_loss(output_latents, target):
 
-                        output_latents = output_latents.float()
+                    #     output_latents = output_latents.float()
+                    #     target = target.float()
+                    #     mse_loss = F.mse_loss(output_latents, target, reduction='none')
+                    #     final_loss = mse_loss.mean()
+                    #     return final_loss
+
+                    def custom_mse_loss(noise_pred, target, threshold=50):
+                        noise_pred = noise_pred.float()
                         target = target.float()
-                        mse_loss = F.mse_loss(output_latents, target, reduction='none')
-                        final_loss = mse_loss.mean()
+                        diff = noise_pred - target
+                        mse_loss = F.mse_loss(noise_pred, target, reduction='none')
+                        mask = (diff.abs() <= threshold).float()
+                        masked_loss = mse_loss * mask
+                        final_loss = masked_loss.mean()
                         return final_loss
 
-                    output_latents = noise_scheduler.step(noise_pred, timesteps, noisy_latents)[0]
+                    loss = custom_mse_loss(noise_pred.float(), target.float())
+
                     if accelerator.is_main_process:
                         if global_step % (len(train_dataloader) - 1) == 0 or global_step == 0:
                             with torch.no_grad():
+                                output_latents = noise_scheduler.step(noise_pred, timesteps, noisy_latents)[0]
                                 video_predict_output = decode_latents(output_latents.to(weight_dtype), vae)
                                 video_predict_output = torch.from_numpy(video_predict_output)
                                 video_target = decode_latents(latents_output, vae)
@@ -1838,7 +1876,7 @@ def main():
                                 save_videos_grid(video_predict_output, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_predict_output.gif"))
                                 save_videos_grid(video_target, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_target.gif"))
 
-                    loss = custom_mse_loss(output_latents.float(), latents_output.float())
+                    # loss = custom_mse_loss(output_latents.float(), latents_output.float())
 
                     if args.motion_sub_loss and noise_pred.size()[2] > 2:
                         gt_sub_noise = noise_pred[:, :, 1:].float() - noise_pred[:, :, :-1].float()
@@ -1862,11 +1900,11 @@ def main():
                         noise=noise,
                         model_kwargs=dict(
                             encoder_hidden_states=prompt_embeds,
-                            encoder_attention_mask=prompt_attention_mask,
+                            # encoder_attention_mask=prompt_attention_mask,
                             added_cond_kwargs=added_cond_kwargs,
                             inpaint_latents=inpaint_latents if args.train_mode != "normal" else None,
                             clip_encoder_hidden_states=clip_encoder_hidden_states if args.train_mode != "normal" else None,
-                            clip_attention_mask=clip_attention_mask if args.train_mode != "normal" else None,
+                            # clip_attention_mask=clip_attention_mask if args.train_mode != "normal" else None,
                             return_dict=False,
                         ),
                     )

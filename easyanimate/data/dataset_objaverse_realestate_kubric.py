@@ -191,7 +191,7 @@ class ALLDatasetsSampler(BatchSampler):
                     del bucket[:]
             except Exception as e:
                 # 可选：记录错误信息以便调试
-                print(f"ALLDatasetsSampler __iter__ Error processing index {idx}: {e}")
+                # print(f"ALLDatasetsSampler __iter__ Error processing index {idx}: {e}")
                 continue  # 跳过当前迭代，继续下一个
 
 
@@ -1055,19 +1055,19 @@ class ObjaverseDataset(Dataset):
         sample["idx"] = idx
 
         if self.enable_inpaint:
-            mask = get_random_mask(pixel_values_input.size())
-            mask_pixel_values = pixel_values_input * (1 - mask) + torch.ones_like(pixel_values_input) * -1 * mask
+            mask = get_random_mask(pixel_values_output.size())
+            mask_pixel_values = pixel_values_output * (1 - mask) + torch.ones_like(pixel_values_output) * -1 * mask
             sample["mask_pixel_values"] = mask_pixel_values
             sample["mask"] = mask
 
-            clip_pixel_values = sample["pixel_values_input"][0].permute(1, 2, 0).contiguous()
+            clip_pixel_values = sample["pixel_values_input"].permute(0, 2, 3, 1).contiguous()
             clip_pixel_values = (clip_pixel_values * 0.5 + 0.5) * 255
             sample["clip_pixel_values"] = clip_pixel_values
 
-            ref_pixel_values = sample["pixel_values_input"][0].unsqueeze(0)
-            if (mask == 1).all():
-                ref_pixel_values = torch.ones_like(ref_pixel_values) * -1
-            sample["ref_pixel_values"] = ref_pixel_values
+            # ref_pixel_values = sample["pixel_values_input"][0].unsqueeze(0)
+            # if (mask == 1).all():
+            #     ref_pixel_values = torch.ones_like(ref_pixel_values) * -1
+            # sample["ref_pixel_values"] = ref_pixel_values
 
         return sample
 
@@ -1172,19 +1172,19 @@ class RealEstateDataset(Dataset):
         sample["idx"] = idx
 
         if self.enable_inpaint:
-            mask = get_random_mask(pixel_values_input.size())
-            mask_pixel_values = pixel_values_input * (1 - mask) + torch.ones_like(pixel_values_input) * -1 * mask
+            mask = get_random_mask(pixel_values_output.size())
+            mask_pixel_values = pixel_values_output * (1 - mask) + torch.ones_like(pixel_values_output) * -1 * mask
             sample["mask_pixel_values"] = mask_pixel_values
             sample["mask"] = mask
 
-            clip_pixel_values = sample["pixel_values_input"][0].permute(1, 2, 0).contiguous()
+            clip_pixel_values = sample["pixel_values_input"].permute(0, 2, 3, 1).contiguous()
             clip_pixel_values = (clip_pixel_values * 0.5 + 0.5) * 255
             sample["clip_pixel_values"] = clip_pixel_values
 
-            ref_pixel_values = sample["pixel_values_input"][0].unsqueeze(0)
-            if (mask == 1).all():
-                ref_pixel_values = torch.ones_like(ref_pixel_values) * -1
-            sample["ref_pixel_values"] = ref_pixel_values
+            # ref_pixel_values = sample["pixel_values_input"][0].unsqueeze(0)
+            # if (mask == 1).all():
+            #     ref_pixel_values = torch.ones_like(ref_pixel_values) * -1
+            # sample["ref_pixel_values"] = ref_pixel_values
 
         return sample
 
@@ -1296,19 +1296,19 @@ class KubricDataset(Dataset):
         sample["idx"] = idx
 
         if self.enable_inpaint:
-            mask = get_random_mask(pixel_values_input.size())
-            mask_pixel_values = pixel_values_input * (1 - mask) + torch.ones_like(pixel_values_input) * -1 * mask
+            mask = get_random_mask(pixel_values_output.size())
+            mask_pixel_values = pixel_values_output * (1 - mask) + torch.ones_like(pixel_values_output) * -1 * mask
             sample["mask_pixel_values"] = mask_pixel_values
             sample["mask"] = mask
 
-            clip_pixel_values = sample["pixel_values_input"][0].permute(1, 2, 0).contiguous()
+            clip_pixel_values = sample["pixel_values_input"].permute(0, 2, 3, 1).contiguous()
             clip_pixel_values = (clip_pixel_values * 0.5 + 0.5) * 255
             sample["clip_pixel_values"] = clip_pixel_values
 
-            ref_pixel_values = sample["pixel_values_input"][0].unsqueeze(0)
-            if (mask == 1).all():
-                ref_pixel_values = torch.ones_like(ref_pixel_values) * -1
-            sample["ref_pixel_values"] = ref_pixel_values
+            # ref_pixel_values = sample["pixel_values_input"][0].unsqueeze(0)
+            # if (mask == 1).all():
+            #     ref_pixel_values = torch.ones_like(ref_pixel_values) * -1
+            # sample["ref_pixel_values"] = ref_pixel_values
 
         return sample
 

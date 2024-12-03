@@ -4,7 +4,7 @@ transformer_additional_kwargs:
   time_position_encoding_type:                "3d_rope"
   resize_inpaint_mask_directly:               true
   enable_text_attention_mask:                 false
-  enable_clip_in_inpaint:                     false
+  enable_clip_in_inpaint:                     true
 
 vae_kwargs:
   vae_type: "AutoencoderKLMagvit"

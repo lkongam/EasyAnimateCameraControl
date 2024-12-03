@@ -1,5 +1,5 @@
 export MODEL_NAME="models/Diffusion_Transformer/EasyAnimateV5-7b-zh-CameraControl"
-export POSE_ADAPTOR_CKPT="models/Camera_Pose/CameraCtrl_svd.ckpt"
+export POSE_ADAPTOR_CKPT="models/Camera_Pose/CameraCtrl_svdxt.ckpt"
 export DATASET_NAME="datasets/all_datasets"
 export DATASET_META_NAME="datasets/all_datasets/objaverse_realestate_kubric.json"
 export NCCL_IB_DISABLE=1
@@ -13,7 +13,7 @@ accelerate launch \
   --use_deepspeed \
   --deepspeed_config_file config/zero_stage2_config.json \
   --deepspeed_multinode_launcher standard \
-  --main_process_port 29501 \
+  --main_process_port 29502 \
   scripts/train_v2v_camera_control.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --train_data_dir=$DATASET_NAME \
@@ -24,16 +24,15 @@ accelerate launch \
   --video_sample_n_frames=49 \
   --train_batch_size=1 \
   --gradient_accumulation_steps=2 \
-  --dataloader_num_workers=4 \
+  --dataloader_num_workers=8 \
   --num_train_epochs=100 \
   --checkpointing_steps=34 \
-  --resume_from_checkpoint latest \
   --checkpoints_total_limit=2 \
   --learning_rate=2e-05 \
   --lr_scheduler="constant_with_warmup" \
   --lr_warmup_steps=100 \
   --seed=42 \
-  --output_dir="output_dir_20241129" \
+  --output_dir="output_dir_20241203" \
   --gradient_checkpointing \
   --mixed_precision="bf16" \
   --adam_weight_decay=5e-3 \
