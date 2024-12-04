@@ -1925,8 +1925,14 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         params = [p.numel() if "ff." in n else 0 for n, p in model.named_parameters()]
         print(f"### ff. Parameters: {sum(params) / 1e6} M")
 
-        params = [p.numel() if ".clip_proj" in n else 0 for n, p in model.named_parameters()]
-        print(f"### .clip_proj Parameters: {sum(params) / 1e6} M")
+        params = [p.numel() if "pose_encoder." in n else 0 for n, p in model.named_parameters()]
+        print(f"### pose_encoder. Parameters: {sum(params) / 1e6} M")
+
+        params = [p.numel() if "pose_proj." in n else 0 for n, p in model.named_parameters()]
+        print(f"### pose_proj. Parameters: {sum(params) / 1e6} M")
+
+        params = [p.numel() if "clip_proj." in n else 0 for n, p in model.named_parameters()]
+        print(f"### clip_proj. Parameters: {sum(params) / 1e6} M")
 
         model = model.to(torch_dtype)
         return model

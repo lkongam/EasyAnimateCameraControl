@@ -166,3 +166,5 @@ cython_debug/
 #.idea/
 
 # .vscode/
+*.mp4
+test_*.py
