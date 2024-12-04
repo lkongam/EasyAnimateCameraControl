@@ -965,7 +965,7 @@ def main():
         optimizer_cls = torch.optim.AdamW
 
     # Select trainable params
-    trainable_params = list(filter(lambda p: p.requires_grad, transformer3d.parameters()))
+    # trainable_params = list(filter(lambda p: p.requires_grad, transformer3d.parameters()))
     trainable_params_optim = [
         {'params': [], 'lr': args.learning_rate},
         {'params': [], 'lr': args.learning_rate / 2},
@@ -1677,11 +1677,11 @@ def main():
                                 inputs = image_processor(images=image_list, return_tensors="pt")
                                 inputs["pixel_values"] = inputs["pixel_values"].to(accelerator.device, dtype=weight_dtype)
 
-                                # 批量编码图像
-                                if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
-                                    encoder_outputs = image_encoder(**inputs).last_hidden_state[:, 1:]
-                                else:
-                                    encoder_outputs = image_encoder(**inputs).image_embeds
+                                # # 批量编码图像
+                                # if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
+                                #     encoder_outputs = image_encoder(**inputs).last_hidden_state[:, 1:]
+                                # else:
+                                encoder_outputs = image_encoder(**inputs).image_embeds
 
                                 # encoder_outputs 形状为 [bs * 49, hidden_dim]
                                 # 将其重塑回 [bs, 49, hidden_dim]
