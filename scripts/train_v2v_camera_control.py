@@ -30,6 +30,7 @@ import logging
 import math
 import os
 import pickle
+import random
 import shutil
 import sys
 
@@ -1268,15 +1269,17 @@ def main():
         #     persistent_workers=True if args.dataloader_num_workers != 0 else False,
         #     num_workers=args.dataloader_num_workers,
         # )
-
+        # sampler = DistributedSampler(train_dataset, shuffle=True, seed=args.seed)
         train_dataloader = DataLoader(
             train_dataset,
             batch_size=args.train_batch_size,
+            # sampler=sampler,
             shuffle=True,
             num_workers=args.dataloader_num_workers,
             pin_memory=True,
             persistent_workers=(args.dataloader_num_workers > 0),
             drop_last=True,
+            prefetch_factor=4 if (args.dataloader_num_workers > 0) else None,
         )
 
     # Scheduler and math around the number of training steps.
@@ -1396,12 +1399,11 @@ def main():
     idx_sampling = DiscreteSampling(args.train_sampling_steps, uniform_sampling=args.uniform_sampling)
 
     for epoch in range(first_epoch, args.num_train_epochs):
-        # if epoch >= first_epoch + 1:
-        #     breakpoint()
         train_loss = 0.0
         # batch_sampler.sampler.generator = torch.Generator().manual_seed(args.seed + epoch)
-        if hasattr(train_dataloader, 'sampler') and isinstance(train_dataloader.sampler, torch.utils.data.DistributedSampler):
-            train_dataloader.sampler.set_epoch(epoch)
+        seed = args.seed + epoch
+        torch.manual_seed(seed)
+        random.seed(seed)
 
         for step, batch in enumerate(train_dataloader):
             # print("run into for step, batch in enumerate(train_dataloader) ----------")
@@ -1571,6 +1573,7 @@ def main():
                 if args.low_vram:
                     torch.cuda.empty_cache()
                     vae.to(accelerator.device)
+                    image_encoder.to(accelerator.device)
                     if not args.enable_text_encoder_in_dataloader:
                         text_encoder.to(accelerator.device)
                         if text_encoder_2 is not None:
@@ -1710,6 +1713,7 @@ def main():
                 # Reduce the vram by offload vae and text encoders
                 if args.low_vram:
                     vae.to('cpu')
+                    image_encoder.to('cpu')
                     torch.cuda.empty_cache()
                     if not args.enable_text_encoder_in_dataloader:
                         text_encoder.to(accelerator.device)
