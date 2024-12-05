@@ -1825,8 +1825,7 @@ def main():
                     # add_time_ids = list((1024, 1024) + target_size + (0, 0))
                     # add_time_ids = torch.tensor([add_time_ids], dtype=prompt_embeds.dtype)
                     # To latents.device
-                    if prompt_embeds is not None:
-                        prompt_embeds = prompt_embeds.to(device=latents_input.device)
+                    prompt_embeds = prompt_embeds.to(device=latents_input.device)
                     # prompt_attention_mask = prompt_attention_mask.to(device=latents_input.device)
                     if prompt_embeds_2 is not None:
                         prompt_embeds_2 = prompt_embeds_2.to(device=latents_input.device)
