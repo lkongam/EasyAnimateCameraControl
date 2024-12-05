@@ -1713,39 +1713,16 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
         hidden_states = hidden_states.flatten(2).transpose(1, 2)
 
         encoder_hidden_states = self.text_proj(encoder_hidden_states)
+        encoder_hidden_states_t5 = self.text_proj_t5(encoder_hidden_states_t5)
+        encoder_hidden_states = torch.cat([encoder_hidden_states, encoder_hidden_states_t5], dim=1).contiguous()
 
-        if encoder_hidden_states_t5 is not None:
-            encoder_hidden_states_t5 = self.text_proj_t5(encoder_hidden_states_t5)
-            encoder_hidden_states = torch.cat([encoder_hidden_states, encoder_hidden_states_t5], dim=1).contiguous()
-
-        # if ref_latents is not None:
-        #     ref_batch, ref_channels, ref_video_length, ref_height, ref_width = ref_latents.shape
-        #     ref_latents = rearrange(ref_latents, "b c f h w ->(b f) c h w")
-        #     ref_latents = self.ref_proj(ref_latents)
-        #     ref_latents = rearrange(ref_latents, "(b f) c h w -> b c f h w", f=ref_video_length, h=ref_height // self.patch_size, w=ref_width // self.patch_size)
-        #     ref_latents = ref_latents.flatten(2).transpose(1, 2)
-
-        #     emb_size = hidden_states.size()[-1]
-        #     ref_pos_embedding = self.ref_pos_embedding
-        #     ref_pos_embedding_interpolate = ref_pos_embedding.view(1, 1, self.post_patch_height, self.post_patch_width, emb_size).permute([0, 4, 1, 2, 3])
-        #     ref_pos_embedding_interpolate = F.interpolate(
-        #         ref_pos_embedding_interpolate, size=[1, height // self.config.patch_size, width // self.config.patch_size], mode='trilinear', align_corners=False
-        #     )
-        #     ref_pos_embedding_interpolate = ref_pos_embedding_interpolate.permute([0, 2, 3, 4, 1]).view(1, -1, emb_size)
-        #     ref_latents = ref_latents + ref_pos_embedding_interpolate
-
-        #     encoder_hidden_states = ref_latents
-
-        if clip_encoder_hidden_states is not None:
-            clip_encoder_hidden_states = self.clip_proj(clip_encoder_hidden_states)
-            encoder_hidden_states = torch.concat([encoder_hidden_states, clip_encoder_hidden_states], dim=1)
+        clip_encoder_hidden_states = self.clip_proj(clip_encoder_hidden_states)
+        encoder_hidden_states = torch.concat([encoder_hidden_states, clip_encoder_hidden_states], dim=1)
 
         # 3. pose embedding
-        if self.pose_encoder is not None:
-            camera_pose_hidden_states = self.pose_encoder(plucker_embedding)
-            # camera_pose_hidden_states [torch.Size([49, 320, 48, 84]), torch.Size([49, 640, 24, 42]), torch.Size([49, 1280, 12, 21]), torch.Size([49, 1280, 6, 10])]
-            camera_pose_hidden_states = self.pose_proj(camera_pose_hidden_states)
-            encoder_hidden_states = torch.concat([encoder_hidden_states, camera_pose_hidden_states], dim=1)
+        camera_pose_hidden_states = self.pose_encoder(plucker_embedding)
+        camera_pose_hidden_states = self.pose_proj(camera_pose_hidden_states)
+        encoder_hidden_states = torch.concat([encoder_hidden_states, camera_pose_hidden_states], dim=1)
 
         # 4. Transformer blocks
         for i, block in enumerate(self.transformer_blocks):

@@ -1279,7 +1279,7 @@ def main():
             pin_memory=True,
             persistent_workers=(args.dataloader_num_workers > 0),
             drop_last=True,
-            prefetch_factor=4 if (args.dataloader_num_workers > 0) else None,
+            # prefetch_factor=4 if (args.dataloader_num_workers > 0) else None,
         )
 
     # Scheduler and math around the number of training steps.
@@ -1427,9 +1427,9 @@ def main():
                     save_videos_grid(pixel_values_output, f"{args.output_dir}/sanity_check/{gif_name_output[:10]}.gif", rescale=True)
 
                 if args.train_mode != "normal":
-                    clip_pixel_values, mask_pixel_values, texts = batch['clip_pixel_values'].cpu(), batch['mask_pixel_values'].cpu(), batch['text']
+                    clip_pixel_values, mask_pixel_values = batch['clip_pixel_values'].cpu(), batch['mask_pixel_values'].cpu()
                     mask_pixel_values = rearrange(mask_pixel_values, "b f c h w -> b c f h w")
-                    for idx, (clip_pixel_value, pixel_value, text) in enumerate(zip(clip_pixel_values, mask_pixel_values, texts)):
+                    for idx, pixel_value in enumerate(mask_pixel_values):
                         pixel_value = pixel_value[None, ...]
                         # Image.fromarray(np.uint8(clip_pixel_value)).save(f"{args.output_dir}/sanity_check/clip_{f'{global_step}-{idx}'}.png")
                         save_videos_grid(pixel_value, f"{args.output_dir}/sanity_check/mask_{f'{global_step}-{idx}'}.gif", rescale=True)
@@ -1825,7 +1825,8 @@ def main():
                     # add_time_ids = list((1024, 1024) + target_size + (0, 0))
                     # add_time_ids = torch.tensor([add_time_ids], dtype=prompt_embeds.dtype)
                     # To latents.device
-                    prompt_embeds = prompt_embeds.to(device=latents_input.device)
+                    if prompt_embeds is not None:
+                        prompt_embeds = prompt_embeds.to(device=latents_input.device)
                     # prompt_attention_mask = prompt_attention_mask.to(device=latents_input.device)
                     if prompt_embeds_2 is not None:
                         prompt_embeds_2 = prompt_embeds_2.to(device=latents_input.device)
