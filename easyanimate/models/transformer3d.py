@@ -1721,7 +1721,7 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
 
         # 3. pose embedding
         camera_pose_hidden_states = self.pose_encoder(plucker_embedding)
-        camera_pose_hidden_states = self.pose_proj(camera_pose_hidden_states)
+        camera_pose_hidden_states = self.pose_proj(camera_pose_hidden_states, batch_size)
         encoder_hidden_states = torch.concat([encoder_hidden_states, camera_pose_hidden_states], dim=1)
 
         # 4. Transformer blocks
@@ -1793,9 +1793,22 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
             config = json.load(f)
 
         from diffusers.utils import WEIGHTS_NAME
+        from safetensors.torch import load_file, safe_open
 
-        model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
-        model_file_safetensors = model_file.replace(".bin", ".safetensors")
+        model_file_name = WEIGHTS_NAME.split('.')[0]
+        # model_file = os.path.join(pretrained_model_path, WEIGHTS_NAME)
+        # model_file_safetensors = model_file.replace(".bin", ".safetensors")
+        # 查找所有分片的 safetensors 文件
+        safetensors_pattern = os.path.join(pretrained_model_path, f'{model_file_name}*.safetensors')
+        safetensors_files = sorted(glob.glob(safetensors_pattern))
+        if not safetensors_files:
+            raise RuntimeError(f"未找到任何符合模式 {safetensors_pattern} 的 safetensors 文件")
+        # 加载并合并所有 state_dict
+        state_dict = {}
+        for file_path in safetensors_files:
+            print(f"加载分片文件: {file_path}")
+            partial_state = load_file(file_path)
+            state_dict.update(partial_state)
 
         if low_cpu_mem_usage:
             try:
@@ -1809,10 +1822,12 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
                 # Instantiate model with empty weights
                 with accelerate.init_empty_weights():
                     model = cls.from_config(config, **transformer_additional_kwargs)
+                    if pose_encoder:
+                        model.pose_encoder = pose_encoder
+                        model.pose_proj = pose_proj
                 param_device = "cpu"
-                from safetensors.torch import load_file, safe_open
 
-                state_dict = load_file(model_file_safetensors)
+                # state_dict = load_file(model_file_safetensors)
                 model._convert_deprecated_attention_blocks(state_dict)
                 # move the params from meta device to cpu
                 missing_keys = set(model.state_dict().keys()) - set(state_dict.keys())
@@ -1840,21 +1855,21 @@ class EasyAnimateTransformer3DModelCameraControl(ModelMixin, ConfigMixin):
                 print(f"The low_cpu_mem_usage mode is not work because {e}. Use low_cpu_mem_usage=False instead.")
 
         model = cls.from_config(config, **transformer_additional_kwargs)
-        if os.path.exists(model_file):
-            state_dict = torch.load(model_file, map_location="cpu")
-        elif os.path.exists(model_file_safetensors):
-            from safetensors.torch import load_file, safe_open
+        # if os.path.exists(model_file):
+        #     state_dict = torch.load(model_file, map_location="cpu")
+        # elif os.path.exists(model_file_safetensors):
+        #     from safetensors.torch import load_file, safe_open
 
-            state_dict = load_file(model_file_safetensors)
-        else:
-            from safetensors.torch import load_file, safe_open
+        #     state_dict = load_file(model_file_safetensors)
+        # else:
+        #     from safetensors.torch import load_file, safe_open
 
-            model_files_safetensors = glob.glob(os.path.join(pretrained_model_path, "*.safetensors"))
-            state_dict = {}
-            for model_file_safetensors in model_files_safetensors:
-                _state_dict = load_file(model_file_safetensors)
-                for key in _state_dict:
-                    state_dict[key] = _state_dict[key]
+        #     model_files_safetensors = glob.glob(os.path.join(pretrained_model_path, "*.safetensors"))
+        #     state_dict = {}
+        #     for model_file_safetensors in model_files_safetensors:
+        #         _state_dict = load_file(model_file_safetensors)
+        #         for key in _state_dict:
+        #             state_dict[key] = _state_dict[key]
 
         if model.state_dict()['proj.weight'].size() != state_dict['proj.weight'].size():
             new_shape = model.state_dict()['proj.weight'].size()

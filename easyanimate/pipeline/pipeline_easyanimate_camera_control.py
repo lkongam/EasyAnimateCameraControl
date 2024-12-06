@@ -15,6 +15,7 @@
 import inspect
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from diffusers import DiffusionPipeline
@@ -759,8 +760,8 @@ class EasyAnimatePipelineCameraControl(DiffusionPipeline):
         original_size: Optional[Tuple[int, int]] = (1024, 1024),
         target_size: Optional[Tuple[int, int]] = None,
         crops_coords_top_left: Tuple[int, int] = (0, 0),
-        clip_image: Image = None,
-        clip_apply_ratio: float = 0.40,
+        clip_images: Image = None,
+        clip_apply_ratio: float = 1.0,
         strength: float = 1.0,
         noise_aug_strength: float = 0.0563,
         comfyui_progressbar: bool = False,
@@ -845,7 +846,7 @@ class EasyAnimatePipelineCameraControl(DiffusionPipeline):
                 The targeted dimensions of the generated image, also utilized in the time id calculations.
             crops_coords_top_left (`Tuple[int, int]`, *optional*, defaults to `(0, 0)`):
                 Coordinates defining the top left corner of any cropping, utilized while calculating the time ids.
-            clip_image (`Image`, *optional*):
+            clip_images (`Image`, *optional*):
                 An optional image to assist in the generation process. It may be used as an additional visual cue.
             clip_apply_ratio (`float`, *optional*, defaults to 0.40):
                 Ratio indicating how much influence the clip image should exert over the generated content.
@@ -908,12 +909,15 @@ class EasyAnimatePipelineCameraControl(DiffusionPipeline):
         else:
             dtype = self.transformer.dtype
 
+        plucker_embedding = plucker_embedding.to(device=device, dtype=dtype)
+        plucker_embedding = torch.cat([plucker_embedding] * 2) if self.do_classifier_free_guidance else plucker_embedding
+
         # 3. Encode input prompt
         (
             prompt_embeds,
             negative_prompt_embeds,
-            prompt_attention_mask,
-            negative_prompt_attention_mask,
+            _,
+            _,
         ) = self.encode_prompt(
             prompt=prompt,
             device=device,
@@ -930,8 +934,8 @@ class EasyAnimatePipelineCameraControl(DiffusionPipeline):
         (
             prompt_embeds_2,
             negative_prompt_embeds_2,
-            prompt_attention_mask_2,
-            negative_prompt_attention_mask_2,
+            _,
+            _,
         ) = self.encode_prompt(
             prompt=prompt,
             device=device,
@@ -997,36 +1001,60 @@ class EasyAnimatePipelineCameraControl(DiffusionPipeline):
             pbar.update(1)
 
         # 6. Prepare clip latents if it needs.
-        if clip_image is not None and self.transformer.enable_clip_in_inpaint:
-            inputs = self.clip_image_processor(images=clip_image, return_tensors="pt")
-            inputs["pixel_values"] = inputs["pixel_values"].to(device, dtype=dtype)
-            clip_encoder_hidden_states = self.clip_image_encoder(**inputs).last_hidden_state[:, 1:]
-            clip_encoder_hidden_states_neg = torch.zeros(
-                [batch_size, int(self.clip_image_encoder.config.image_size / self.clip_image_encoder.config.patch_size) ** 2, int(self.clip_image_encoder.config.hidden_size)]
-            ).to(device, dtype=dtype)
+        if clip_images is not None and self.transformer.enable_clip_in_inpaint:
+            # 假设 clip_pixel_values 的形状是 [bs, 49, 384, 672, 3]
+            bs, num_frames, height, width, channels = clip_images.shape
 
-            clip_attention_mask = torch.ones([batch_size, self.transformer.n_query]).to(device, dtype=dtype)
-            clip_attention_mask_neg = torch.zeros([batch_size, self.transformer.n_query]).to(device, dtype=dtype)
+            # 将 tensor 重塑为 [bs * 49, 384, 672, 3] 并转换为 NumPy 数组
+            images_np = clip_images.view(-1, height, width, channels).cpu().numpy().astype(np.uint8)
+
+            # 转换为 PIL 图像列表
+            image_list = [Image.fromarray(img) for img in images_np]
+
+            # 使用 image_processor 批量处理图像
+            inputs = self.clip_image_processor(images=image_list, return_tensors="pt")
+            inputs["pixel_values"] = inputs["pixel_values"].to(device=device, dtype=dtype)
+
+            # # 批量编码图像
+            # if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
+            #     encoder_outputs = image_encoder(**inputs).last_hidden_state[:, 1:]
+            # else:
+            encoder_outputs = self.clip_image_encoder(**inputs).image_embeds
+
+            # encoder_outputs 形状为 [bs * 49, hidden_dim]
+            # 将其重塑回 [bs, 49, hidden_dim]
+            clip_encoder_hidden_states = encoder_outputs.view(bs, num_frames, -1)
+
+            # inputs = self.clip_image_processor(images=clip_image, return_tensors="pt")
+            # inputs["pixel_values"] = inputs["pixel_values"].to(device, dtype=dtype)
+            # clip_encoder_hidden_states = self.clip_image_encoder(**inputs).last_hidden_state[:, 1:]
+            # clip_encoder_hidden_states_neg = torch.zeros(
+            #     [batch_size, int(self.clip_image_encoder.config.image_size / self.clip_image_encoder.config.patch_size) ** 2, int(self.clip_image_encoder.config.hidden_size)]
+            # ).to(device, dtype=dtype)
+            clip_encoder_hidden_states_neg = torch.zeros_like(clip_encoder_hidden_states, device=device, dtype=dtype)
+
+            # clip_attention_mask = torch.ones([batch_size, self.transformer.n_query]).to(device, dtype=dtype)
+            # clip_attention_mask_neg = torch.zeros([batch_size, self.transformer.n_query]).to(device, dtype=dtype)
 
             clip_encoder_hidden_states_input = (
                 torch.cat([clip_encoder_hidden_states_neg, clip_encoder_hidden_states]) if self.do_classifier_free_guidance else clip_encoder_hidden_states
             )
-            clip_attention_mask_input = torch.cat([clip_attention_mask_neg, clip_attention_mask]) if self.do_classifier_free_guidance else clip_attention_mask
+            # clip_attention_mask_input = torch.cat([clip_attention_mask_neg, clip_attention_mask]) if self.do_classifier_free_guidance else clip_attention_mask
 
-        elif clip_image is None and num_channels_transformer != num_channels_latents and self.transformer.enable_clip_in_inpaint:
-            clip_encoder_hidden_states = torch.zeros(
-                [batch_size, int(self.clip_image_encoder.config.image_size / self.clip_image_encoder.config.patch_size) ** 2, int(self.clip_image_encoder.config.hidden_size)]
-            ).to(device, dtype=dtype)
+        # elif clip_images is None and num_channels_transformer != num_channels_latents and self.transformer.enable_clip_in_inpaint:
+        #     clip_encoder_hidden_states = torch.zeros(
+        #         [batch_size, int(self.clip_image_encoder.config.image_size / self.clip_image_encoder.config.patch_size) ** 2, int(self.clip_image_encoder.config.hidden_size)]
+        #     ).to(device, dtype=dtype)
 
-            clip_attention_mask = torch.zeros([batch_size, self.transformer.n_query])
-            clip_attention_mask = clip_attention_mask.to(device, dtype=dtype)
+        #     clip_attention_mask = torch.zeros([batch_size, self.transformer.n_query])
+        #     clip_attention_mask = clip_attention_mask.to(device, dtype=dtype)
 
-            clip_encoder_hidden_states_input = torch.cat([clip_encoder_hidden_states] * 2) if self.do_classifier_free_guidance else clip_encoder_hidden_states
-            clip_attention_mask_input = torch.cat([clip_attention_mask] * 2) if self.do_classifier_free_guidance else clip_attention_mask
+        #     clip_encoder_hidden_states_input = torch.cat([clip_encoder_hidden_states] * 2) if self.do_classifier_free_guidance else clip_encoder_hidden_states
+        #     clip_attention_mask_input = torch.cat([clip_attention_mask] * 2) if self.do_classifier_free_guidance else clip_attention_mask
 
-        else:
-            clip_encoder_hidden_states_input = None
-            clip_attention_mask_input = None
+        # else:
+        #     clip_encoder_hidden_states_input = None
+        #     clip_attention_mask_input = None
         if comfyui_progressbar:
             pbar.update(1)
 
@@ -1156,16 +1184,16 @@ class EasyAnimatePipelineCameraControl(DiffusionPipeline):
 
         if self.do_classifier_free_guidance:
             prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
-            prompt_attention_mask = torch.cat([negative_prompt_attention_mask, prompt_attention_mask])
+            # prompt_attention_mask = torch.cat([negative_prompt_attention_mask, prompt_attention_mask])
             prompt_embeds_2 = torch.cat([negative_prompt_embeds_2, prompt_embeds_2])
-            prompt_attention_mask_2 = torch.cat([negative_prompt_attention_mask_2, prompt_attention_mask_2])
+            # prompt_attention_mask_2 = torch.cat([negative_prompt_attention_mask_2, prompt_attention_mask_2])
             add_time_ids = torch.cat([add_time_ids] * 2, dim=0)
             style = torch.cat([style] * 2, dim=0)
 
         prompt_embeds = prompt_embeds.to(device=device)
-        prompt_attention_mask = prompt_attention_mask.to(device=device)
+        # prompt_attention_mask = prompt_attention_mask.to(device=device)
         prompt_embeds_2 = prompt_embeds_2.to(device=device)
-        prompt_attention_mask_2 = prompt_attention_mask_2.to(device=device)
+        # prompt_attention_mask_2 = prompt_attention_mask_2.to(device=device)
         add_time_ids = add_time_ids.to(dtype=dtype, device=device).repeat(batch_size * num_images_per_prompt, 1)
         style = style.to(device=device).repeat(batch_size * num_images_per_prompt)
 
@@ -1183,10 +1211,10 @@ class EasyAnimatePipelineCameraControl(DiffusionPipeline):
 
                 if i < len(timesteps) * (1 - clip_apply_ratio) and clip_encoder_hidden_states_input is not None:
                     clip_encoder_hidden_states_actual_input = torch.zeros_like(clip_encoder_hidden_states_input)
-                    clip_attention_mask_actual_input = torch.zeros_like(clip_attention_mask_input)
+                    # clip_attention_mask_actual_input = torch.zeros_like(clip_attention_mask_input)
                 else:
                     clip_encoder_hidden_states_actual_input = clip_encoder_hidden_states_input
-                    clip_attention_mask_actual_input = clip_attention_mask_input
+                    # clip_attention_mask_actual_input = clip_attention_mask_input
 
                 # expand scalar t to 1-D tensor to match the 1st dim of latent_model_input
                 t_expand = torch.tensor([t] * latent_model_input.shape[0], device=device).to(dtype=latent_model_input.dtype)
@@ -1197,15 +1225,15 @@ class EasyAnimatePipelineCameraControl(DiffusionPipeline):
                     t_expand,
                     plucker_embedding=plucker_embedding,
                     encoder_hidden_states=prompt_embeds,
-                    text_embedding_mask=prompt_attention_mask,
+                    # text_embedding_mask=prompt_attention_mask,
                     encoder_hidden_states_t5=prompt_embeds_2,
-                    text_embedding_mask_t5=prompt_attention_mask_2,
+                    # text_embedding_mask_t5=prompt_attention_mask_2,
                     image_meta_size=add_time_ids,
                     style=style,
                     image_rotary_emb=image_rotary_emb,
                     inpaint_latents=inpaint_latents,
                     clip_encoder_hidden_states=clip_encoder_hidden_states_actual_input,
-                    clip_attention_mask=clip_attention_mask_actual_input,
+                    # clip_attention_mask=clip_attention_mask_actual_input,
                     return_dict=False,
                 )[0]
                 if noise_pred.size()[1] != self.vae.config.latent_channels:

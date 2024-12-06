@@ -1,3 +1,4 @@
+import json
 import os
 
 import numpy as np
@@ -13,7 +14,7 @@ from easyanimate.models import name_to_autoencoder_magvit, name_to_transformer3d
 # from easyanimate.pipeline.pipeline_easyanimate_multi_text_encoder_inpaint import EasyAnimatePipeline_Multi_Text_Encoder_Inpaint
 from easyanimate.pipeline.pipeline_easyanimate_camera_control import EasyAnimatePipelineCameraControl
 from easyanimate.utils.lora_utils import merge_lora, unmerge_lora
-from easyanimate.utils.utils import get_video_to_video_latent, save_videos_grid
+from easyanimate.utils.utils import get_image_to_video_latent, get_video_to_video_latent, save_videos_grid
 from easyanimate.utils.fp8_optimization import convert_weight_dtype_wrapper
 from easyanimate.models.pose_encoder import CameraPoseEncoderCameraCtrl, VideoFrameTokenization
 from packaging import version as pver
@@ -175,7 +176,19 @@ def get_plucker_embedding(camera_pose, video_length, sample_size, ori_h, ori_w):
     return plucker_embedding
 
 
-def main():
+def get_empty_plucker_embedding(pixel_values_input, direction_number=6):
+    shape = list(pixel_values_input.shape)
+    shape[1] = direction_number
+    shape = tuple(shape)
+    dtype = pixel_values_input.dtype
+    device = pixel_values_input.device
+    plucker_in = torch.zeros(shape, device=device, dtype=dtype)
+    # plucker_out = torch.zeros(shape, device=device, dtype=dtype)
+
+    return plucker_in
+
+
+def main(asset_data):
     # GPU memory mode, which can be choosen in [model_cpu_offload, model_cpu_offload_and_qfloat8, sequential_cpu_offload].
     # model_cpu_offload means that the entire model will be moved to the CPU after use, which can save some GPU memory.
     #
@@ -189,7 +202,8 @@ def main():
     # Config and model path
     config_path = "config/easyanimate_video_v5_magvit_camera_control.yaml"
     model_name = "models/Diffusion_Transformer/EasyAnimateV5-7b-zh-CameraControl"
-    pose_encoder_pretrained = "models/Camera_Pose/CameraCtrl_svd.ckpt"
+    transformer_model_name = "output_dir_20241205_test/checkpoint-106"
+    # pose_encoder_pretrained = "models/Camera_Pose/CameraCtrl_svd.ckpt"
 
     # Choose the sampler in "Euler" "Euler A" "DPM++" "PNDM" and "DDIM"
     # EasyAnimateV1, V2 and V3 cannot use DDIM.
@@ -197,7 +211,7 @@ def main():
     sampler_name = "DDIM"
 
     # Load pretrained model if need
-    transformer_path = "output_dir/checkpoint-34/transformer"
+    transformer_path = None
     # Only V1 does need a motion module
     motion_module_path = None
     vae_path = None
@@ -216,16 +230,19 @@ def main():
     # ome graphics cards, such as v100, 2080ti, do not support torch.bfloat16
     weight_dtype = torch.bfloat16
     # If you want to generate from text, please set the validation_image_start = None and validation_image_end = None
-    validation_video = "asset/Armature|idle_anim.mp4"
-    validation_camera_pose = "asset/backward.txt"
+    prompt = asset_data['text']
+    negative_prompt = "Twisted body, limb deformities, text captions, comic, static, ugly, error, messy code."
+    validation_image = asset_data['image_path']
+    validation_video = asset_data['video_path']
+    validation_camera_pose = asset_data['pose_file_path']
+    predict_type = asset_data['type']  # image2video, video2video, text2video, textimage2video
     denoise_strength = 0.70
 
     # EasyAnimateV1, V2 and V3 support English.
     # EasyAnimateV4 and V5 support English and Chinese.
     # 使用更长的neg prompt如"模糊，突变，变形，失真，画面暗，文本字幕，画面固定，连环画，漫画，线稿，没有主体。"，可以增加稳定性
     # 在neg prompt中添加"安静，固定"等词语可以增加动态性。
-    prompt = ""
-    negative_prompt = ""
+
     #
     # Using longer neg prompt such as "Blurring, mutation, deformation, distortion, dark and solid, comics, text subtitles, line art." can increase stability
     # Adding words such as "quiet, solid" to the neg prompt can increase dynamism.
@@ -250,7 +267,8 @@ def main():
     pose_proj = VideoFrameTokenization()
 
     transformer = Choosen_Transformer3DModel.from_pretrained_2d(
-        model_name,
+        # model_name,
+        transformer_model_name,
         subfolder="transformer",
         transformer_additional_kwargs=transformer_additional_kwargs,
         torch_dtype=torch.float8_e4m3fn if GPU_memory_mode == "model_cpu_offload_and_qfloat8" else weight_dtype,
@@ -367,9 +385,17 @@ def main():
         video_length = int((video_length - 1) // vae.mini_batch_encoder * vae.mini_batch_encoder) + 1 if video_length != 1 else 1
     else:
         video_length = int(video_length // vae.mini_batch_encoder * vae.mini_batch_encoder) if video_length != 1 else 1
-    input_video, input_video_mask, clip_image, ori_h, ori_w = get_video_to_video_latent(validation_video, video_length=video_length, fps=fps, sample_size=sample_size)
+
+    # image2video, video2video, text2video, textimage2video
+    if predict_type in ['image2video', 'textimage2video']:
+        input_video, input_video_mask, clip_images, ori_h, ori_w = get_image_to_video_latent(validation_image, None, video_length=video_length, sample_size=sample_size)
+    elif predict_type == 'video2video':
+        input_video, input_video_mask, clip_images, ori_h, ori_w = get_video_to_video_latent(validation_video, video_length=video_length, fps=fps, sample_size=sample_size)
+    elif predict_type == 'text2video':
+        input_video, input_video_mask, clip_images, ori_h, ori_w = get_image_to_video_latent(None, None, video_length=video_length, sample_size=sample_size)
 
     plucker_embedding = get_plucker_embedding(validation_camera_pose, video_length, sample_size, ori_h, ori_w)
+    plucker_embedding = plucker_embedding.unsqueeze(0)
 
     with torch.no_grad():
         sample = pipeline(
@@ -383,7 +409,7 @@ def main():
             num_inference_steps=num_inference_steps,
             video=input_video,
             mask_video=input_video_mask,
-            clip_image=clip_image,
+            clip_images=clip_images,
             strength=denoise_strength,
             plucker_embedding=plucker_embedding,
         ).videos
@@ -411,4 +437,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    assets_json_path = "asset/predict_data.json"
+    with open(assets_json_path, 'r', encoding='utf-8') as file:
+        data = json.load(file)
+
+    main(data[0])

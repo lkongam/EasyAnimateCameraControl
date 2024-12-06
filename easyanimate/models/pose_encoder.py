@@ -516,7 +516,7 @@ class VideoFrameTokenization(nn.Module):
         # 全连接层，将融合后的特征投影到3072维
         self.fc = nn.Linear(512 * 4, output_dim)
 
-    def forward(self, feature_maps):
+    def forward(self, feature_maps, batch_size):
         """
         参数:
             feature_maps: 一个包含4个特征图的列表，每个特征图的尺寸分别为:
@@ -555,7 +555,9 @@ class VideoFrameTokenization(nn.Module):
         # 投影到3072维
         tokens = self.fc(x)  # [b, 3072]
 
-        tokens = tokens.unsqueeze(0)
+        # tokens = tokens.unsqueeze(0)
+
+        tokens = rearrange(tokens, "(b f) t -> b f t", b=batch_size)
 
         # 如果有多个帧，可以对每个帧独立处理，以下假设输入包含多帧
         # 但根据您的描述，49是帧数，可能需要对每帧独立处理

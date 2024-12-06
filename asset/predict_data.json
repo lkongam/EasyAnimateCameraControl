@@ -1,0 +1,9 @@
+[
+    {
+        "text": "",
+        "image_path": "/home/yunkang/EasyAnimateCameraControl/asset/1.png",
+        "video_path": "",
+        "pose_file_path": "asset/backward.txt",
+        "type": "image2video"
+    }
+]
