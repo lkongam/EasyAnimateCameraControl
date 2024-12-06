@@ -142,20 +142,26 @@ def compute_plucker(cam_params, video_sample_size, ori_h, ori_w):
 
     cam_params = [Camera(cam_param) for cam_param in cam_params]
 
-    ori_wh_ratio = ori_w / ori_h
-    sample_wh_ratio = video_sample_size[1] / video_sample_size[0]
-    if ori_wh_ratio > sample_wh_ratio:  # rescale fx
-        resized_ori_w = video_sample_size[0] * ori_wh_ratio
-        for cam_param in cam_params:
-            cam_param.fx = resized_ori_w * cam_param.fx / video_sample_size[1]
-    else:  # rescale fy
-        resized_ori_h = video_sample_size[1] / ori_wh_ratio
-        for cam_param in cam_params:
-            cam_param.fy = resized_ori_h * cam_param.fy / video_sample_size[0]
+    if ori_h and ori_w:
+        ori_wh_ratio = ori_w / ori_h
+        sample_wh_ratio = video_sample_size[1] / video_sample_size[0]
+        if ori_wh_ratio > sample_wh_ratio:  # rescale fx
+            resized_ori_w = video_sample_size[0] * ori_wh_ratio
+            for cam_param in cam_params:
+                cam_param.fx = resized_ori_w * cam_param.fx / video_sample_size[1]
+        else:  # rescale fy
+            resized_ori_h = video_sample_size[1] / ori_wh_ratio
+            for cam_param in cam_params:
+                cam_param.fy = resized_ori_h * cam_param.fy / video_sample_size[0]
 
     intrinsics = np.asarray(
         [
-            [cam_param.fx * video_sample_size[1], cam_param.fy * video_sample_size[0], cam_param.cx * video_sample_size[1], cam_param.cy * video_sample_size[0]]
+            [
+                cam_param.fx * video_sample_size[1],
+                cam_param.fy * video_sample_size[0],
+                cam_param.cx * video_sample_size[1],
+                cam_param.cy * video_sample_size[0],
+            ]
             for cam_param in cam_params
         ],
         dtype=np.float32,
@@ -395,7 +401,7 @@ def main(asset_data):
         input_video, input_video_mask, clip_images, ori_h, ori_w = get_image_to_video_latent(None, None, video_length=video_length, sample_size=sample_size)
 
     plucker_embedding = get_plucker_embedding(validation_camera_pose, video_length, sample_size, ori_h, ori_w)
-    plucker_embedding = plucker_embedding.unsqueeze(0)
+    plucker_embedding = plucker_embedding.unsqueeze(0)  # torch.Size([1, 49, 6, 384, 672])
 
     with torch.no_grad():
         sample = pipeline(
@@ -441,4 +447,4 @@ if __name__ == "__main__":
     with open(assets_json_path, 'r', encoding='utf-8') as file:
         data = json.load(file)
 
-    main(data[0])
+    main(data[3])

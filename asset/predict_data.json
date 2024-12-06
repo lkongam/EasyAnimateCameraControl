@@ -1,9 +1,30 @@
 [
     {
         "text": "",
-        "image_path": "/home/yunkang/EasyAnimateCameraControl/asset/1.png",
+        "image_path": "asset/realestate8bd5cb1a874d6fb2.png",
         "video_path": "",
-        "pose_file_path": "asset/backward.txt",
+        "pose_file_path": "asset/realestate8bd5cb1a874d6fb2.txt",
         "type": "image2video"
+    },
+    {
+        "text": "a living room with a ceiling fan and wicker furniture",
+        "image_path": "",
+        "video_path": "",
+        "pose_file_path": "asset/realestate8bd5cb1a874d6fb2.txt",
+        "type": "text2video"
+    },
+    {
+        "text": "a living room with a ceiling fan and wicker furniture",
+        "image_path": "asset/realestate8bd5cb1a874d6fb2.png",
+        "video_path": "",
+        "pose_file_path": "asset/realestate8bd5cb1a874d6fb2.txt",
+        "type": "textimage2video"
+    },
+    {
+        "text": "",
+        "image_path": "",
+        "video_path": "asset/objaverse_Armature_idle_anim_in.mp4",
+        "pose_file_path": "asset/Armature|idle_anim_COLMAP_camera.txt",
+        "type": "video2video"
     }
 ]
