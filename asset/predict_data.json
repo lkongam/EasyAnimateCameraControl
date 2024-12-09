@@ -26,5 +26,12 @@
         "video_path": "asset/objaverse_Armature_idle_anim_in.mp4",
         "pose_file_path": "asset/Armature|idle_anim_COLMAP_camera.txt",
         "type": "video2video"
+    },
+    {
+        "text": "",
+        "image_path": "",
+        "video_path": "asset/20240719024331_view_0_1_in.mp4",
+        "pose_file_path": "asset/20240719024331_view_0_1.txt",
+        "type": "video2video"
     }
 ]
