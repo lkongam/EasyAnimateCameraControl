@@ -55,9 +55,9 @@ def extract_frames(input_path, output_path, start_frame, num_frames):
 
 if __name__ == "__main__":
     # 示例用法
-    input_video = "asset/Armature|idle_anim.mp4"  # 输入视频文件路径
-    output_video = "asset/objaverse_Armature_idle_anim_in.mp4"  # 输出视频文件路径
-    start = 1  # 开始帧（从1开始计数）
+    input_video = "asset/20240719024331_view_0_1.mp4"  # 输入视频文件路径
+    output_video = "asset/20240719024331_view_0_1_out.mp4"  # 输出视频文件路径
+    start = 61  # 开始帧（从1开始计数）
     num = 49  # 要提取的帧数
 
     extract_frames(input_video, output_video, start, num)
