@@ -242,7 +242,7 @@ def main(asset_data):
     validation_video = asset_data['video_path']
     validation_camera_pose = asset_data['pose_file_path']
     predict_type = asset_data['type']  # image2video, video2video, text2video, textimage2video
-    denoise_strength = 0.70
+    denoise_strength = 1.0
 
     # EasyAnimateV1, V2 and V3 support English.
     # EasyAnimateV4 and V5 support English and Chinese.
@@ -447,4 +447,4 @@ if __name__ == "__main__":
     with open(assets_json_path, 'r', encoding='utf-8') as file:
         data = json.load(file)
 
-    main(data[3])
+    main(data[4])

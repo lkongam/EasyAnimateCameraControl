@@ -620,34 +620,41 @@ class EasyAnimatePipelineCameraControl(DiffusionPipeline):
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
 
-        if return_video_latents or (latents is None and not is_strength_max):
-            video = video.to(device=device, dtype=dtype)
-            if self.vae.quant_conv is None or self.vae.quant_conv.weight.ndim == 5:
-                bs = 1
-                new_video = []
-                for i in range(0, video.shape[0], bs):
-                    video_bs = video[i : i + bs]
-                    video_bs = self.vae.encode(video_bs)[0]
-                    video_bs = video_bs.sample()
-                    new_video.append(video_bs)
-                video = torch.cat(new_video, dim=0)
-                video = video * self.vae.config.scaling_factor
+            # if return_video_latents or (latents is None and not is_strength_max):
+        video = video.to(device=device, dtype=dtype)
+        if self.vae.quant_conv is None or self.vae.quant_conv.weight.ndim == 5:
+            bs = 1
+            new_video = []
+            for i in range(0, video.shape[0], bs):
+                video_bs = video[i : i + bs]
+                video_bs = self.vae.encode(video_bs)[0]
+                video_bs = video_bs.sample()
+                new_video.append(video_bs)
+            video = torch.cat(new_video, dim=0)
+            video = video * self.vae.config.scaling_factor
 
+        else:
+            if video.shape[1] == 4:
+                video = video
             else:
-                if video.shape[1] == 4:
-                    video = video
-                else:
-                    video_length = video.shape[2]
-                    video = rearrange(video, "b c f h w -> (b f) c h w")
-                    video = self._encode_vae_image(video, generator=generator)
-                    video = rearrange(video, "(b f) c h w -> b c f h w", f=video_length)
-            video_latents = video.repeat(batch_size // video.shape[0], 1, 1, 1, 1)
-            video_latents = video_latents.to(device=device, dtype=dtype)
+                video_length = video.shape[2]
+                video = rearrange(video, "b c f h w -> (b f) c h w")
+                video = self._encode_vae_image(video, generator=generator)
+                video = rearrange(video, "(b f) c h w -> b c f h w", f=video_length)
+        video_latents = video.repeat(batch_size // video.shape[0], 1, 1, 1, 1)
+        video_latents = video_latents.to(device=device, dtype=dtype)
 
         if latents is None:
             noise = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
             # if strength is 1. then initialise the latents to noise, else initial to image + noise
-            latents = noise if is_strength_max else self.scheduler.add_noise(video_latents, noise, timestep)
+            # latents = noise if is_strength_max else self.scheduler.add_noise(video_latents, noise, timestep)
+            if is_strength_max:
+                # latents = noise
+                video_latents[:, :, 1:, ...] = 0
+                video_latents = video_latents.to(device=device, dtype=dtype)
+                latents = self.scheduler.add_noise(video_latents, noise, timestep)
+            else:
+                latents = self.scheduler.add_noise(video_latents, noise, timestep)
             # if pure noise then scale the initial latents by the  Scheduler's init sigma
             latents = latents * self.scheduler.init_noise_sigma if is_strength_max else latents
         else:
