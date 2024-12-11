@@ -21,6 +21,8 @@ from torch.utils.data import BatchSampler, Sampler
 from torch.utils.data.dataset import Dataset
 from typing import List, Dict, Any, Optional, Union, Tuple
 
+from tqdm import tqdm
+
 VIDEO_READER_TIMEOUT = 20
 
 
@@ -945,7 +947,7 @@ class GenXD(Dataset):
         # print(len(whole_video))
         # print(len(whole_camera_para))
 
-        assert len(whole_video) == len(whole_camera_para), "the length of video must be euqal with that of camera parameter."
+        assert len(whole_video) == len(whole_camera_para), f"the length of video({len(whole_video)}) must be euqal with camera parameter({len(whole_camera_para)}): {video_dir}."
 
         batch_index_input, batch_index_output = self.get_batch_index(len(whole_video))
         plucker_embedding_input, plucker_embedding_output = get_plucker_embedding(
@@ -1590,28 +1592,31 @@ if __name__ == "__main__":
     from torch.utils.data import DataLoader
 
     train_dataset = ALLDatasets(
-        "datasets/z_mini_datasets/mini_datasets_metadata.json",
-        'datasets/z_mini_datasets',
+        '/mnt/chenyang_lei/Datasets/easyanimate_dataset/metadata_4000.json',
+        "/mnt/chenyang_lei/Datasets/easyanimate_dataset",
         video_sample_size=[384, 672],
         video_sample_stride=3,
         video_sample_n_frames=49,
         enable_inpaint=True,
     )
 
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=1,
-        shuffle=True,
-        num_workers=0,
-        pin_memory=True,
-        drop_last=True,
-    )
+    # train_dataloader = DataLoader(
+    #     train_dataset,
+    #     batch_size=1,
+    #     shuffle=True,
+    #     num_workers=0,
+    #     pin_memory=True,
+    #     drop_last=True,
+    # )
 
-    sample = train_dataset[325]
-    print(sample)
+    # sample = train_dataset[325]
+    # print(sample)
 
-    # # 检查所有样本是否有 None
-    # for idx in range(len(train_dataset)):
-    #     sample = train_dataset[idx]
-    #     if sample is None:
-    #         print(f"Dataset 返回了 None 在索引 {idx}")
+    # 检查所有样本是否有 None
+    for idx in tqdm(range(len(train_dataset)), desc="Processing dataset"):
+        try:
+            sample = train_dataset[idx]
+        except Exception as e:
+            print(f'{idx}保存：{e}')
+        if sample is None:
+            print(f"Dataset 返回了 None 在索引 {idx}")

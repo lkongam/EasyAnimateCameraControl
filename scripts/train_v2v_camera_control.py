@@ -26,6 +26,7 @@
 
 import argparse
 import gc
+import json
 import logging
 import math
 import os
@@ -2039,37 +2040,79 @@ def main():
 
         if args.checkpointing_epochs is not None and epoch % args.checkpointing_epochs == 0:
             if args.use_deepspeed or accelerator.is_main_process:
-                # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
-                if args.checkpoints_total_limit is not None:
-                    checkpoints = os.listdir(args.output_dir)
-                    checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
-                    checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
 
-                    # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
-                    if len(checkpoints) >= args.checkpoints_total_limit:
-                        logger.info(f"existing checkpoints is {', '.join(checkpoints)}")
-                        num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
-                        removing_checkpoints = checkpoints[0:num_to_remove]
+                # 定义保存的检查点名称
+                if epoch == 0:
+                    save_dir = "checkpoint-0"
+                else:
+                    save_dir = "checkpoint-latest"
 
-                        logger.info(f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints")
-                        logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
+                # 定义完整的保存路径
+                save_path = os.path.join(args.output_dir, save_dir)
 
-                        for removing_checkpoint in removing_checkpoints:
-                            removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
-                            shutil.rmtree(removing_checkpoint, ignore_errors=True)
+                # 如果不是第0个epoch，并且已经存在一个 "checkpoint-latest"，则先删除它
+                if epoch != 0:
+                    existing_latest = os.path.join(args.output_dir, "checkpoint-latest")
+                    if os.path.exists(existing_latest):
+                        shutil.rmtree(existing_latest, ignore_errors=True)
+                        logger.info(f"Removed existing latest checkpoint at {existing_latest}")
 
-                save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+                # 保存当前的检查点
                 accelerator.save_state(save_path)
                 logger.info(f"Saved state to {save_path}")
 
-                with torch.no_grad():
-                    output_latents = noise_scheduler.step(noise_pred, timesteps, noisy_latents)[0]
-                    video_predict_output = decode_latents(output_latents.to(weight_dtype), vae)
-                    video_predict_output = torch.from_numpy(video_predict_output)
-                    video_target = decode_latents(latents_output, vae)
-                    video_target = torch.from_numpy(video_target)
-                    save_videos_grid(video_predict_output, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_predict_output.gif"))
-                    save_videos_grid(video_target, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_target.gif"))
+                # 如果不是第0个epoch，创建一个metadata文件，记录epoch和step
+                if epoch != 0:
+                    metadata = {"epoch": epoch, "step": global_step}
+                    metadata_path = os.path.join(save_path, "metadata.json")
+                    with open(metadata_path, "w") as f:
+                        json.dump(metadata, f)
+                    logger.info(f"Saved metadata to {metadata_path}")
+
+                # 确保只保留 "checkpoint-0" 和 "checkpoint-latest"
+                if args.checkpoints_total_limit is not None:
+                    all_checkpoints = os.listdir(args.output_dir)
+                    all_checkpoints = [d for d in all_checkpoints if d.startswith("checkpoint")]
+                    checkpoints_to_keep = ["checkpoint-0", "checkpoint-latest"]
+
+                    # 遍历所有检查点，删除不在保留列表中的
+                    for ckpt in all_checkpoints:
+                        if ckpt not in checkpoints_to_keep:
+                            ckpt_path = os.path.join(args.output_dir, ckpt)
+                            shutil.rmtree(ckpt_path, ignore_errors=True)
+                            logger.info(f"Removed unnecessary checkpoint: {ckpt}")
+
+                # # _before_ saving state, check if this save would set us over the `checkpoints_total_limit`
+                # if args.checkpoints_total_limit is not None:
+                #     checkpoints = os.listdir(args.output_dir)
+                #     checkpoints = [d for d in checkpoints if d.startswith("checkpoint")]
+                #     checkpoints = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))
+
+                #     # before we save the new checkpoint, we need to have at _most_ `checkpoints_total_limit - 1` checkpoints
+                #     if len(checkpoints) >= args.checkpoints_total_limit:
+                #         logger.info(f"existing checkpoints is {', '.join(checkpoints)}")
+                #         num_to_remove = len(checkpoints) - args.checkpoints_total_limit + 1
+                #         removing_checkpoints = checkpoints[0:num_to_remove]
+
+                #         logger.info(f"{len(checkpoints)} checkpoints already exist, removing {len(removing_checkpoints)} checkpoints")
+                #         logger.info(f"removing checkpoints: {', '.join(removing_checkpoints)}")
+
+                #         for removing_checkpoint in removing_checkpoints:
+                #             removing_checkpoint = os.path.join(args.output_dir, removing_checkpoint)
+                #             shutil.rmtree(removing_checkpoint, ignore_errors=True)
+
+                # save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
+                # accelerator.save_state(save_path)
+                # logger.info(f"Saved state to {save_path}")
+
+                # with torch.no_grad():
+                #     output_latents = noise_scheduler.step(noise_pred, timesteps, noisy_latents)[0]
+                #     video_predict_output = decode_latents(output_latents.to(weight_dtype), vae)
+                #     video_predict_output = torch.from_numpy(video_predict_output)
+                #     video_target = decode_latents(latents_output, vae)
+                #     video_target = torch.from_numpy(video_target)
+                #     save_videos_grid(video_predict_output, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_predict_output.gif"))
+                #     save_videos_grid(video_target, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_target.gif"))
 
     # Create the pipeline using the trained modules and save it.
     accelerator.wait_for_everyone()
