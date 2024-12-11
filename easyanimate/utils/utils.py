@@ -216,7 +216,7 @@ def get_video_to_video_latent(input_video_path, video_length, sample_size, fps=N
         input_video_mask = input_video_mask.to(input_video.device, input_video.dtype)
     else:
         input_video_mask = torch.zeros_like(input_video[:, :1])
-        input_video_mask[:, :, :] = 255
+        input_video_mask[:, :, 1:] = 255
 
     clip_images = input_video.permute(0, 2, 3, 4, 1).contiguous()
     clip_images = (clip_images * 0.5 + 0.5) * 255
