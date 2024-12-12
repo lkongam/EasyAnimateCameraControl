@@ -4,6 +4,7 @@
         "image_path": "asset/realestate8bd5cb1a874d6fb2.png",
         "video_path": "",
         "pose_file_path": "asset/realestate8bd5cb1a874d6fb2.txt",
+        "groud_truth_path": "asset/realestate8bd5cb1a874d6fb2.mp4",
         "type": "image2video"
     },
     {
@@ -11,6 +12,7 @@
         "image_path": "",
         "video_path": "",
         "pose_file_path": "asset/realestate8bd5cb1a874d6fb2.txt",
+        "groud_truth_path": "asset/realestate8bd5cb1a874d6fb2.mp4",
         "type": "text2video"
     },
     {
@@ -18,6 +20,7 @@
         "image_path": "asset/realestate8bd5cb1a874d6fb2.png",
         "video_path": "",
         "pose_file_path": "asset/realestate8bd5cb1a874d6fb2.txt",
+        "groud_truth_path": "asset/realestate8bd5cb1a874d6fb2.mp4",
         "type": "textimage2video"
     },
     {
@@ -25,6 +28,7 @@
         "image_path": "",
         "video_path": "asset/objaverse_Armature_idle_anim_in.mp4",
         "pose_file_path": "asset/Armature|idle_anim_COLMAP_camera.txt",
+        "groud_truth_path": "asset/objaverse_Armature_idle_anim_out.mp4",
         "type": "video2video"
     },
     {
@@ -32,6 +36,7 @@
         "image_path": "",
         "video_path": "asset/20240719024331_view_0_1_in.mp4",
         "pose_file_path": "asset/20240719024331_view_0_1.txt",
+        "groud_truth_path": "asset/20240719024331_view_0_1_out.mp4",
         "type": "video2video"
     }
 ]
