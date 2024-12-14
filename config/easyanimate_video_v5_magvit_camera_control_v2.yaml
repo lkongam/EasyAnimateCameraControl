@@ -1,0 +1,33 @@
+transformer_additional_kwargs:
+  transformer_type:                           "EasyAnimateTransformer3DModelCameraControlV1"
+  after_norm:                                 false
+  time_position_encoding_type:                "3d_rope"
+  resize_inpaint_mask_directly:               true
+  enable_text_attention_mask:                 false
+  enable_clip_in_inpaint:                     true
+
+vae_kwargs:
+  vae_type: "AutoencoderKLMagvit"
+  mini_batch_encoder: 4
+  mini_batch_decoder: 1
+  slice_mag_vae: false
+  slice_compression_vae: false
+  cache_compression_vae: false
+  cache_mag_vae: true
+
+text_encoder_kwargs:
+  enable_multi_text_encoder: true
+
+pose_encoder_kwargs:
+  downscale_factor: 8
+  channels: [320, 640, 1280, 1280]
+  nums_rb: 2
+  cin: 384
+  ksize: 1
+  sk: true
+  use_conv: false
+  compression_factor: 1
+  temporal_attention_nhead: 8
+  attention_block_types: ["Temporal_Self", ]
+  temporal_position_encoding: true
+  temporal_position_encoding_max_len: 49

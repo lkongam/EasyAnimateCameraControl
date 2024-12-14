@@ -871,7 +871,7 @@ def main():
 
     if args.enable_xformers_memory_efficient_attention and config['transformer_additional_kwargs'].get('transformer_type', 'Transformer3DModel') in [
         'Transformer3DModel',
-        'EasyAnimateTransformer3DModelCameraControl',
+        'EasyAnimateTransformer3DModelCameraControlV1',
     ]:
         if is_xformers_available():
             import xformers

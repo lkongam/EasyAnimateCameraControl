@@ -12,7 +12,7 @@ from easyanimate.models import name_to_autoencoder_magvit, name_to_transformer3d
 
 # from easyanimate.pipeline.pipeline_easyanimate_inpaint import EasyAnimateInpaintPipeline
 # from easyanimate.pipeline.pipeline_easyanimate_multi_text_encoder_inpaint import EasyAnimatePipeline_Multi_Text_Encoder_Inpaint
-from easyanimate.pipeline.pipeline_easyanimate_camera_control import EasyAnimatePipelineCameraControl
+from easyanimate.pipeline.pipeline_easyanimate_camera_control_v1 import EasyAnimatePipelineCameraControl
 from easyanimate.utils.lora_utils import merge_lora, unmerge_lora
 from easyanimate.utils.utils import get_image_to_video_latent, get_video_to_video_latent, save_videos_grid, get_plucker_embedding
 from easyanimate.utils.fp8_optimization import convert_weight_dtype_wrapper
