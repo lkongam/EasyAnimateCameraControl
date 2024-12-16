@@ -26,7 +26,7 @@ accelerate launch \
   --train_batch_size=1 \
   --video_repeat=1 \
   --gradient_accumulation_steps=1 \
-  --dataloader_num_workers=0 \
+  --dataloader_num_workers=8 \
   --num_train_epochs=100 \
   --checkpointing_steps=100 \
   --learning_rate=2e-05 \
@@ -41,9 +41,9 @@ accelerate launch \
   --vae_mini_batch=1 \
   --max_grad_norm=0.05 \
   --random_hw_adapt \
-  --enable_xformers_memory_efficient_attention \
   --training_with_video_token_length \
   --not_sigma_loss \
+  --enable_bucket \
   --uniform_sampling \
   --use_deepspeed \
   --train_mode="inpaint" \

@@ -14,12 +14,12 @@ accelerate launch \
   --deepspeed_config_file config/zero_stage2_config.json \
   --deepspeed_multinode_launcher standard \
   --main_process_port 29502 \
-  scripts/train_v2v_camera_control.py \
+  scripts/train_v2v_camera_control_V1.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --train_data_dir=$DATASET_NAME \
   --train_data_meta=$DATASET_META_NAME \
   --pose_adaptor_ckpt=$POSE_ADAPTOR_CKPT \
-  --config_path "config/easyanimate_video_v5_magvit_camera_control.yaml" \
+  --config_path "config/easyanimate_video_v5_magvit_camera_control_v1.yaml" \
   --video_sample_stride=3 \
   --video_sample_n_frames=49 \
   --train_batch_size=1 \
