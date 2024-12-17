@@ -34,7 +34,7 @@ from tqdm import tqdm
 from transformers import BertModel, BertTokenizer, CLIPImageProcessor, CLIPVisionModelWithProjection, T5Tokenizer, T5EncoderModel
 
 from .pipeline_easyanimate import EasyAnimatePipelineOutput
-from ..models import AutoencoderKLMagvit, EasyAnimateTransformer3DModelCameraControl
+from ..models import AutoencoderKLMagvit, EasyAnimateTransformer3DModelCameraControlV1
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
@@ -179,7 +179,7 @@ class EasyAnimatePipelineCameraControl(DiffusionPipeline):
         tokenizer: BertTokenizer,
         text_encoder_2: T5EncoderModel,
         tokenizer_2: T5Tokenizer,
-        transformer: EasyAnimateTransformer3DModelCameraControl,
+        transformer: EasyAnimateTransformer3DModelCameraControlV1,
         scheduler: DDIMScheduler,
         safety_checker: StableDiffusionSafetyChecker,
         feature_extractor: CLIPImageProcessor,

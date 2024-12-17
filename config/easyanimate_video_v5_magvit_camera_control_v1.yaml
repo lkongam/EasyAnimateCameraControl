@@ -1,5 +1,5 @@
 transformer_additional_kwargs:
-  transformer_type:                           "EasyAnimateTransformer3DModelCameraControl"
+  transformer_type:                           "EasyAnimateTransformer3DModelCameraControlV1"
   after_norm:                                 false
   time_position_encoding_type:                "3d_rope"
   resize_inpaint_mask_directly:               true
