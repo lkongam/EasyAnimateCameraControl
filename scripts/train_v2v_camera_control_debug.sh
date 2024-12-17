@@ -1,7 +1,7 @@
 export MODEL_NAME="models/Diffusion_Transformer/EasyAnimateV5-7b-zh-CameraControl"
 export POSE_ADAPTOR_CKPT="models/Camera_Pose/CameraCtrl_svdxt.ckpt"
-export DATASET_NAME="datasets/all_datasets"
-export DATASET_META_NAME="datasets/all_datasets/objaverse_realestate_kubric.json"
+export DATASET_NAME="datasets/z_mini_datasets"
+export DATASET_META_NAME="datasets/z_mini_datasets/mini_datasets_metadata.json"
 export NCCL_IB_DISABLE=1
 export NCCL_P2P_DISABLE=1
 export CUDA_VISIBLE_DEVICES=0
@@ -25,14 +25,14 @@ accelerate launch \
   --train_batch_size=1 \
   --gradient_accumulation_steps=1 \
   --dataloader_num_workers=0 \
-  --num_train_epochs=100 \
+  --num_train_epochs=2 \
   --checkpointing_epochs=1 \
   --checkpoints_total_limit=2 \
   --learning_rate=2e-05 \
   --lr_scheduler="constant_with_warmup" \
   --lr_warmup_steps=100 \
   --seed=42 \
-  --output_dir="output_dir_20241204_test" \
+  --output_dir="output_dir_20241211_test" \
   --gradient_checkpointing \
   --mixed_precision="bf16" \
   --adam_weight_decay=5e-3 \
@@ -42,7 +42,6 @@ accelerate launch \
   --not_sigma_loss \
   --uniform_sampling \
   --use_deepspeed \
-  --low_vram \
   --train_mode="CameraControl" \
-  --trainable_modules "." \
+  --trainable_modules "pose_encoder." "pose_proj." "text_proj." "text_proj_t5." "clip_proj." \
   --tracker_project_name="v2v-camera-control-finetune"
