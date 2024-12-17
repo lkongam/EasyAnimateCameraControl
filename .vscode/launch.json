@@ -15,7 +15,7 @@
             "pathMappings": [
                 {
                     "localRoot": "${workspaceFolder}",
-                    "remoteRoot": "/home/chenyang_lei/video_diffusion_models/EasyAnimateCameraControl"
+                    "remoteRoot": "/home/yunkang/EasyAnimateCameraControl"
                 }
             ]
         },
@@ -106,7 +106,7 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "env": {
-                "CUDA_VISIBLE_DEVICES": "1"
+                "CUDA_VISIBLE_DEVICES": "0"
             },
             "justMyCode": true
         }
