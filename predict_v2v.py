@@ -26,7 +26,7 @@ GPU_memory_mode = "model_cpu_offload"
 
 # Config and model path
 config_path = "config/easyanimate_video_v5_magvit_multi_text_encoder.yaml"
-model_name = "models/Diffusion_Transformer/EasyAnimateV5-12b-zh-InP"
+model_name = "models/Diffusion_Transformer/EasyAnimateV5-7b-zh-InP"
 
 # Choose the sampler in "Euler" "Euler A" "DPM++" "PNDM" and "DDIM"
 # EasyAnimateV1, V2 and V3 cannot use DDIM.
@@ -53,7 +53,7 @@ fps = 8
 # ome graphics cards, such as v100, 2080ti, do not support torch.bfloat16
 weight_dtype = torch.bfloat16
 # If you want to generate from text, please set the validation_image_start = None and validation_image_end = None
-validation_video = "asset/1.mp4"
+validation_video = "asset/realestate8bd5cb1a874d6fb2.mp4"
 denoise_strength = 0.70
 
 # EasyAnimateV1, V2 and V3 support English.
