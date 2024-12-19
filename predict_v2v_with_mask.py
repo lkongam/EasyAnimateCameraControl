@@ -30,7 +30,7 @@ def get_video_to_video_latent_with_mask(input_video_path, video_length, sample_s
                 break
 
             if frame_count % frame_skip == 0:
-                frame = cv2.resize(frame, (sample_size[1], sample_size[0]))
+                # frame = cv2.resize(frame, (sample_size[1], sample_size[0]))
                 input_video.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
 
             frame_count += 1
@@ -74,6 +74,7 @@ def get_video_to_video_latent_with_mask(input_video_path, video_length, sample_s
     input_video_mask = input_video_mask.permute([3, 0, 1, 2]).unsqueeze(0)
     input_video_mask = (input_video_mask == 0).all(dim=1, keepdim=True)
     input_video_mask = input_video_mask * 255
+    input_video_mask = input_video_mask.to(input_video.device, input_video.dtype)
 
     output_video = torch.from_numpy(np.array(split_frames[1]))
     output_video = output_video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
@@ -100,7 +101,7 @@ GPU_memory_mode = "model_cpu_offload"
 
 # Config and model path
 config_path = "config/easyanimate_video_v5_magvit_multi_text_encoder.yaml"
-model_name = "models/Diffusion_Transformer/EasyAnimateV5-12b-zh-InP"
+model_name = "models/Diffusion_Transformer/EasyAnimateV5-7b-zh-InP"
 
 # Choose the sampler in "Euler" "Euler A" "DPM++" "PNDM" and "DDIM"
 # EasyAnimateV1, V2 and V3 cannot use DDIM.
@@ -286,7 +287,7 @@ if vae.cache_mag_vae:
     video_length = int((video_length - 1) // vae.mini_batch_encoder * vae.mini_batch_encoder) + 1 if video_length != 1 else 1
 else:
     video_length = int(video_length // vae.mini_batch_encoder * vae.mini_batch_encoder) if video_length != 1 else 1
-input_video, input_video_mask = get_video_to_video_latent_with_mask(validation_video, video_length=video_length, fps=fps, sample_size=sample_size)
+input_video, input_video_mask, output_video = get_video_to_video_latent_with_mask(validation_video, video_length=video_length, sample_size=sample_size)
 
 with torch.no_grad():
     sample = pipeline(
