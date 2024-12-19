@@ -70,7 +70,7 @@ from easyanimate.data.bucket_sampler import (
     RandomSampler,
     get_closest_ratio,
 )
-from easyanimate.data.dataset_image_video import ImageVideoDataset, ImageVideoSampler, get_random_mask
+from easyanimate.data.dataset_inpainting_with_mask import ImageVideoDataset, ImageVideoSampler, get_random_mask
 from easyanimate.models import name_to_autoencoder_magvit, name_to_transformer3d
 from easyanimate.pipeline.pipeline_easyanimate import EasyAnimatePipeline
 from easyanimate.pipeline.pipeline_easyanimate_inpaint import EasyAnimateInpaintPipeline
