@@ -15,6 +15,13 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
+import debugpy
+
+# 允许其他机器连接
+debugpy.listen(("0.0.0.0", 5678))
+print("等待调试器连接...")
+debugpy.wait_for_client()  # 阻塞，直到调试器连接
+print("调试器已连接")
 
 import argparse
 import gc
@@ -966,9 +973,9 @@ def main():
         def save_model_hook(models, weights, output_dir):
             if accelerator.is_main_process:
                 if args.use_ema:
-                    ema_transformer3d.save_pretrained(os.path.join(output_dir, "transformer_ema"))
+                    ema_transformer3d.save_pretrained(os.path.join(output_dir, "transformer_ema"), max_shard_size="30GB")
 
-                models[0].save_pretrained(os.path.join(output_dir, "transformer"))
+                models[0].save_pretrained(os.path.join(output_dir, "transformer"), max_shard_size="30GB")
                 if not args.use_deepspeed:
                     weights.pop()
 
@@ -1092,8 +1099,6 @@ def main():
         video_sample_size=args.video_sample_size,
         video_sample_stride=args.video_sample_stride,
         video_sample_n_frames=args.video_sample_n_frames,
-        video_repeat=args.video_repeat,
-        image_sample_size=args.image_sample_size,
         enable_bucket=args.enable_bucket,
         enable_inpaint=True if args.train_mode != "normal" else False,
     )

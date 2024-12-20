@@ -163,13 +163,20 @@ def VideoReader_contextmanager(*args, **kwargs):
 
 
 def get_video_reader_batch(video_reader, batch_index):
-
     total_frames = video_reader.get_batch(batch_index).asnumpy()
-    videos = np.split(total_frames, 3, axis=2)
 
-    pixel_values = videos[0]
-    masks = videos[1][:, :, :, 0:1]
-    ground_truth = videos[2]
+    # 第一步：垂直分割成 2 行，每行高度为 512
+    rows = np.split(total_frames, 2, axis=1)  # 生成列表，包含 2 个数组，每个数组形状为 (25, 512, 1536, 3)
+
+    # 第二步：对每一行进行水平分割，分成 3 列，每列宽度为 512
+    videos = []
+    for row in rows:
+        cols = np.split(row, 3, axis=2)  # 每行分成 3 列，shape 为 (25, 512, 512, 3)
+        videos.extend(cols)  # 将分割后的列添加到 videos 列表中
+
+    pixel_values = videos[3]
+    masks = videos[4][:, :, :, 0:1]
+    ground_truth = videos[5]
 
     return pixel_values, masks, ground_truth
 
@@ -300,7 +307,7 @@ class VideoDatasetWithMask(Dataset):
         data_info = self.dataset[idx % len(self.dataset)]
 
         # if data_info.get('type', 'image') == 'video':
-        video_id, text, data_type = data_info['file_path'], data_info['text'], data_info['type']
+        video_id, text, data_type = data_info['video_file_path'], data_info['text'], data_info['type']
 
         if self.data_root is None:
             video_dir = video_id
@@ -308,13 +315,61 @@ class VideoDatasetWithMask(Dataset):
             video_dir = os.path.join(self.data_root, video_id)
 
         with VideoReader_contextmanager(video_dir, num_threads=2) as video_reader:
-            min_sample_n_frames = min(self.video_sample_n_frames, int(len(video_reader) * (self.video_length_drop_end - self.video_length_drop_start) // self.video_sample_stride))
-            if min_sample_n_frames == 0:
-                raise ValueError(f"No Frames in video.")
+            # min_sample_n_frames = min(self.video_sample_n_frames, int(len(video_reader) * (self.video_length_drop_end - self.video_length_drop_start) // self.video_sample_stride))
+            # if min_sample_n_frames == 0:
+            #     raise ValueError(f"No Frames in video.")
 
-            video_length = int(self.video_length_drop_end * len(video_reader))
-            clip_length = min(video_length, (min_sample_n_frames - 1) * self.video_sample_stride + 1)
-            start_idx = random.randint(int(self.video_length_drop_start * video_length), video_length - clip_length) if video_length != clip_length else 0
+            # video_length = int(self.video_length_drop_end * len(video_reader))
+            # clip_length = min(video_length, (min_sample_n_frames - 1) * self.video_sample_stride + 1)
+            # start_idx = random.randint(int(self.video_length_drop_start * video_length), video_length - clip_length) if video_length != clip_length else 0
+            # batch_index = np.linspace(start_idx, start_idx + clip_length - 1, min_sample_n_frames, dtype=int)
+            total_frames = len(video_reader)
+
+            # 计算有效采样区域的起始和结束帧数
+            start_drop = int(self.video_length_drop_start * total_frames)
+            end_drop = int(self.video_length_drop_end * total_frames)
+            valid_length = end_drop - start_drop  # 有效采样区域的总帧数
+
+            if valid_length <= 0:
+                raise ValueError("有效采样区域的长度必须大于0。请检查 `video_length_drop_start` 和 `video_length_drop_end` 的设置。")
+
+            # 动态计算 stride，使其在1到3之间，并尽可能接近 video_sample_n_frames
+            # 尝试从 stride=3 开始，如果无法满足，则减小 stride
+            for stride in range(3, 0, -1):
+                possible_max_frames = (valid_length + stride - 1) // stride  # 向上取整
+                if possible_max_frames >= self.video_sample_n_frames:
+                    chosen_stride = stride
+                    break
+            else:
+                # 如果 stride=1 也无法满足，则选择 stride=1 并尽可能采样多的帧
+                chosen_stride = 1
+
+            self.video_sample_stride = chosen_stride
+
+            # 计算实际可以采样的帧数
+            possible_frames = (valid_length + self.video_sample_stride - 1) // self.video_sample_stride
+            min_sample_n_frames = min(self.video_sample_n_frames, possible_frames)
+
+            if min_sample_n_frames == 0:
+                raise ValueError("在设定的采样参数下，无法采样到任何帧。")
+
+            # 计算片段的总长度
+            clip_length = (min_sample_n_frames - 1) * self.video_sample_stride + 1
+            if clip_length > valid_length:
+                clip_length = valid_length
+                min_sample_n_frames = (clip_length + self.video_sample_stride - 1) // self.video_sample_stride
+
+            # 随机选择起始索引
+            if valid_length != clip_length:
+                start_idx_lower = start_drop
+                start_idx_upper = end_drop - clip_length
+                if start_idx_upper < start_idx_lower:
+                    start_idx_upper = start_idx_lower  # 防止随机范围出现负值
+                start_idx = random.randint(start_idx_lower, start_idx_upper)
+            else:
+                start_idx = start_drop
+
+            # 生成采样帧的索引
             batch_index = np.linspace(start_idx, start_idx + clip_length - 1, min_sample_n_frames, dtype=int)
 
             try:
@@ -384,7 +439,7 @@ class VideoDatasetWithMask(Dataset):
                 sample["pixel_values"] = pixel_values
                 sample["ground_truth"] = ground_truth
                 sample["text"] = text
-                sample["data_type"] = data_type
+                sample["type"] = data_type
                 sample["idx"] = idx
 
                 if len(sample) > 0:
@@ -415,7 +470,35 @@ class VideoDatasetWithMask(Dataset):
 
 
 if __name__ == "__main__":
-    dataset = VideoDatasetWithMask(ann_path="test.json")
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, num_workers=16)
-    for idx, batch in enumerate(dataloader):
-        print(batch["pixel_values"].shape, len(batch["text"]))
+    # dataset = VideoDatasetWithMask(ann_path="test.json")
+    # dataloader = torch.utils.data.DataLoader(dataset, batch_size=4, num_workers=16)
+    # for idx, batch in enumerate(dataloader):
+    #     print(batch["pixel_values"].shape, len(batch["text"]))
+    from bucket_sampler import RandomSampler
+
+    train_dataset = VideoDatasetWithMask(
+        "datasets/z_mini_datasets_warped_videos_2_3/metadata.json",
+        "datasets/z_mini_datasets_warped_videos_2_3",
+        video_sample_size=256,
+        video_sample_stride=3,
+        video_sample_n_frames=25,
+        enable_bucket=False,
+        enable_inpaint=True,
+    )
+
+    # DataLoaders creation:
+    batch_sampler_generator = torch.Generator().manual_seed(42)
+    batch_sampler = VideoSamplerWithMask(RandomSampler(train_dataset, generator=batch_sampler_generator), train_dataset, 1)
+    train_dataloader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_sampler=batch_sampler,
+        persistent_workers=True,
+        num_workers=1,
+    )
+
+    for epoch in range(0, 100):
+        batch_sampler.sampler.generator = torch.Generator().manual_seed(42 + epoch)
+        for step, batch in enumerate(train_dataloader):
+            print(
+                f"Epoch: {epoch}, Step: {step}, idx: {batch['idx']}, pixel_values: {batch['pixel_values'].shape}, ground_truth: {batch['ground_truth'].shape}, type: {batch['type']}, mask_pixel_values: {batch['mask_pixel_values'].shape}, mask: {batch['mask'].shape}, clip_pixel_values: {batch['clip_pixel_values'].shape}, ref_pixel_values: {batch['ref_pixel_values'].shape}"
+            )
