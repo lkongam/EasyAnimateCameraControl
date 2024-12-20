@@ -54,7 +54,8 @@ from huggingface_hub import create_repo, upload_folder
 from omegaconf import OmegaConf
 from packaging import version
 from PIL import Image
-from torch.utils.data import RandomSampler
+
+# from torch.utils.data import RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 from torchvision import transforms
 from tqdm.auto import tqdm
@@ -74,16 +75,17 @@ current_file_path = os.path.abspath(__file__)
 project_roots = [os.path.dirname(current_file_path), os.path.dirname(os.path.dirname(current_file_path))]
 for project_root in project_roots:
     sys.path.insert(0, project_root) if project_root not in sys.path else None
+from easyanimate.data.bucket_sampler import RandomSampler
 
-from easyanimate.data.bucket_sampler import (
-    ASPECT_RATIO_512,
-    ASPECT_RATIO_RANDOM_CROP_512,
-    ASPECT_RATIO_RANDOM_CROP_PROB,
-    AspectRatioBatchImageSampler,
-    AspectRatioBatchImageVideoSampler,
-    RandomSampler,
-    get_closest_ratio,
-)
+# from easyanimate.data.bucket_sampler import (
+#     ASPECT_RATIO_512,
+#     ASPECT_RATIO_RANDOM_CROP_512,
+#     ASPECT_RATIO_RANDOM_CROP_PROB,
+#     AspectRatioBatchImageSampler,
+#     AspectRatioBatchImageVideoSampler,
+#     RandomSampler,
+#     get_closest_ratio,
+# )
 from easyanimate.data.dataset_inpainting_with_mask import (
     VideoSamplerWithMask,
     VideoDatasetWithMask,
@@ -115,13 +117,13 @@ rotary_pos_embed_cache = {}
 
 def _get_2d_rotary_pos_embed_cached(embed_dim, crops_coords, grid_size):
     tmp_key = (embed_dim, crops_coords, grid_size)
-    print(
-        'embed_dim=%d crops_coords=%s grid_size=%s in_cache=%d cache_size=%d' % (embed_dim, crops_coords, grid_size, tmp_key in rotary_pos_embed_cache, len(rotary_pos_embed_cache))
-    )
+    # print(
+    #     'embed_dim=%d crops_coords=%s grid_size=%s in_cache=%d cache_size=%d' % (embed_dim, crops_coords, grid_size, tmp_key in rotary_pos_embed_cache, len(rotary_pos_embed_cache))
+    # )
     if tmp_key not in rotary_pos_embed_cache:
         tmp_embed = get_2d_rotary_pos_embed(embed_dim, crops_coords, grid_size)
         tmp_embed_gpu = (tmp_embed[0].cuda(), tmp_embed[1].cuda())
-        print('\tembed_dim=%d data_size=%s' % (embed_dim, tmp_embed[0].shape))
+        # print('\tembed_dim=%d data_size=%s' % (embed_dim, tmp_embed[0].shape))
         rotary_pos_embed_cache[tmp_key] = tmp_embed_gpu
         return tmp_embed_gpu
     else:
@@ -130,9 +132,9 @@ def _get_2d_rotary_pos_embed_cached(embed_dim, crops_coords, grid_size):
 
 def _get_3d_rotary_pos_embed_cached(embed_dim, crops_coords, grid_size, temporal_size):
     tmp_key = (embed_dim, crops_coords, grid_size, temporal_size)
-    print(
-        'embed_dim=%d crops_coords=%s grid_size=%s in_cache=%d cache_size=%d' % (embed_dim, crops_coords, grid_size, tmp_key in rotary_pos_embed_cache, len(rotary_pos_embed_cache))
-    )
+    # print(
+    #     'embed_dim=%d crops_coords=%s grid_size=%s in_cache=%d cache_size=%d' % (embed_dim, crops_coords, grid_size, tmp_key in rotary_pos_embed_cache, len(rotary_pos_embed_cache))
+    # )
     if tmp_key not in rotary_pos_embed_cache:
         tmp_embed = get_3d_rotary_pos_embed(
             embed_dim,
@@ -142,7 +144,7 @@ def _get_3d_rotary_pos_embed_cached(embed_dim, crops_coords, grid_size, temporal
             use_real=True,
         )
         tmp_embed_gpu = (tmp_embed[0].cuda(), tmp_embed[1].cuda())
-        print('\tembed_dim=%d data_size=%s' % (embed_dim, tmp_embed[0].shape))
+        # print('\tembed_dim=%d data_size=%s' % (embed_dim, tmp_embed[0].shape))
         rotary_pos_embed_cache[tmp_key] = tmp_embed_gpu
         return tmp_embed_gpu
     else:
@@ -753,6 +755,46 @@ def parse_args():
     return args
 
 
+def smooth_output(vae, video, mini_batch_encoder):
+    if video.size()[2] <= mini_batch_encoder:
+        return video
+    prefix_index_before = mini_batch_encoder // 2
+    prefix_index_after = mini_batch_encoder - prefix_index_before
+    pixel_values = video[:, :, prefix_index_before:-prefix_index_after]
+
+    # Encode middle videos
+    latents = vae.encode(pixel_values)[0]
+    latents = latents.mode()
+    # Decode middle videos
+    middle_video = vae.decode(latents)[0]
+
+    video[:, :, prefix_index_before:-prefix_index_after] = (video[:, :, prefix_index_before:-prefix_index_after] + middle_video) / 2
+    return video
+
+
+def decode_latents(latents, vae):
+    video_length = latents.shape[2]
+    latents = 1 / vae.config.scaling_factor * latents
+    if vae.quant_conv is None or vae.quant_conv.weight.ndim == 5:
+        mini_batch_encoder = vae.mini_batch_encoder
+        mini_batch_decoder = vae.mini_batch_decoder
+        video = vae.decode(latents)[0]
+        video = video.clamp(-1, 1)
+        if not vae.cache_compression_vae and not vae.cache_mag_vae:
+            video = smooth_output(vae, video, mini_batch_encoder).cpu().clamp(-1, 1)
+    else:
+        latents = rearrange(latents, "b c f h w -> (b f) c h w")
+        video = []
+        for frame_idx in tqdm(range(latents.shape[0])):
+            video.append(vae.decode(latents[frame_idx : frame_idx + 1]).sample)
+        video = torch.cat(video)
+        video = rearrange(video, "(b f) c h w -> b c f h w", f=video_length)
+    video = (video / 2 + 0.5).clamp(0, 1)
+    # we always cast to float32 as this does not cause significant overhead and is compatible with bfloa16
+    video = video.cpu().float().numpy()
+    return video
+
+
 def main():
     args = parse_args()
 
@@ -1254,6 +1296,7 @@ def main():
             with accelerator.accumulate(transformer3d):
                 # Convert images to latent space
                 pixel_values = batch["pixel_values"].to(weight_dtype)
+                ground_truth = batch["ground_truth"].to(weight_dtype)
 
                 # Increase the batch size when the length of the latent sequence of the current sample is small
                 if args.training_with_video_token_length:
@@ -1425,9 +1468,12 @@ def main():
                         vae_stream_1.wait_stream(torch.cuda.current_stream())
                         with torch.cuda.stream(vae_stream_1):
                             latents = _batch_encode_vae(pixel_values)
+                            gt_latents = _batch_encode_vae(ground_truth)
                     else:
                         latents = _batch_encode_vae(pixel_values)
+                        gt_latents = _batch_encode_vae(ground_truth)
                     latents = latents * vae.config.scaling_factor
+                    gt_latents = gt_latents * vae.config.scaling_factor
 
                     if args.train_mode != "normal":
                         # Encode masks.
@@ -1639,17 +1685,33 @@ def main():
                     if noise_pred.size()[1] != vae.config.latent_channels:
                         noise_pred, _ = noise_pred.chunk(2, dim=1)
 
-                    def custom_mse_loss(noise_pred, target, threshold=50):
-                        noise_pred = noise_pred.float()
-                        target = target.float()
-                        diff = noise_pred - target
-                        mse_loss = F.mse_loss(noise_pred, target, reduction='none')
-                        mask = (diff.abs() <= threshold).float()
-                        masked_loss = mse_loss * mask
-                        final_loss = masked_loss.mean()
-                        return final_loss
+                    # def custom_mse_loss(noise_pred, target, threshold=50):
+                    #     noise_pred = noise_pred.float()
+                    #     target = target.float()
+                    #     diff = noise_pred - target
+                    #     mse_loss = F.mse_loss(noise_pred, target, reduction='none')
+                    #     mask = (diff.abs() <= threshold).float()
+                    #     masked_loss = mse_loss * mask
+                    #     final_loss = masked_loss.mean()
+                    #     return final_loss
 
-                    loss = custom_mse_loss(noise_pred.float(), target.float())
+                    # loss = custom_mse_loss(noise_pred.float(), target.float())
+
+                    def my_mse_loss(output_latents, target):
+                        return F.mse_loss(output_latents.float(), target.float(), reduction='mean')
+
+                    output_latents = noise_scheduler.step(noise_pred, timesteps, noisy_latents).prev_sample
+                    loss = my_mse_loss(output_latents, gt_latents)
+
+                    if accelerator.is_main_process:
+                        if global_step % (len(train_dataloader) - 1) == 0 or global_step == 0:
+                            with torch.no_grad():
+                                video_predict_output = decode_latents(output_latents.to(weight_dtype), vae)
+                                video_predict_output = torch.from_numpy(video_predict_output)
+                                video_target = decode_latents(gt_latents, vae)
+                                video_target = torch.from_numpy(video_target)
+                                save_videos_grid(video_predict_output, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_predict_output.gif"))
+                                save_videos_grid(video_target, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_target.gif"))
 
                     if args.motion_sub_loss and noise_pred.size()[2] > 2:
                         gt_sub_noise = noise_pred[:, :, 1:].float() - noise_pred[:, :, :-1].float()
