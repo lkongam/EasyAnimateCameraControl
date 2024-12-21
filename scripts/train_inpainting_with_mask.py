@@ -15,13 +15,13 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-import debugpy
+# import debugpy
 
-# 允许其他机器连接
-debugpy.listen(("0.0.0.0", 5678))
-print("等待调试器连接...")
-debugpy.wait_for_client()  # 阻塞，直到调试器连接
-print("调试器已连接")
+# # 允许其他机器连接
+# debugpy.listen(("0.0.0.0", 5678))
+# print("等待调试器连接...")
+# debugpy.wait_for_client()  # 阻塞，直到调试器连接
+# print("调试器已连接")
 
 import argparse
 import gc
@@ -1147,7 +1147,12 @@ def main():
 
     # DataLoaders creation:
     batch_sampler_generator = torch.Generator().manual_seed(args.seed)
-    batch_sampler = VideoSamplerWithMask(RandomSampler(train_dataset, generator=batch_sampler_generator), train_dataset, args.train_batch_size)
+    batch_sampler = VideoSamplerWithMask(
+        RandomSampler(train_dataset, generator=batch_sampler_generator),
+        train_dataset,
+        args.train_batch_size,
+        drop_last=True,
+    )
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         batch_sampler=batch_sampler,
