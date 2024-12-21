@@ -323,60 +323,61 @@ class VideoDatasetWithMask(Dataset):
             # clip_length = min(video_length, (min_sample_n_frames - 1) * self.video_sample_stride + 1)
             # start_idx = random.randint(int(self.video_length_drop_start * video_length), video_length - clip_length) if video_length != clip_length else 0
             # batch_index = np.linspace(start_idx, start_idx + clip_length - 1, min_sample_n_frames, dtype=int)
-            total_frames = len(video_reader)
+            # total_frames = len(video_reader)
 
-            # 计算有效采样区域的起始和结束帧数
-            start_drop = int(self.video_length_drop_start * total_frames)
-            end_drop = int(self.video_length_drop_end * total_frames)
-            valid_length = end_drop - start_drop  # 有效采样区域的总帧数
+            # # 计算有效采样区域的起始和结束帧数
+            # start_drop = int(self.video_length_drop_start * total_frames)
+            # end_drop = int(self.video_length_drop_end * total_frames)
+            # valid_length = end_drop - start_drop  # 有效采样区域的总帧数
 
-            if valid_length <= 0:
-                raise ValueError("有效采样区域的长度必须大于0。请检查 `video_length_drop_start` 和 `video_length_drop_end` 的设置。")
+            # if valid_length <= 0:
+            #     raise ValueError("有效采样区域的长度必须大于0。请检查 `video_length_drop_start` 和 `video_length_drop_end` 的设置。")
 
-            # 动态计算 stride，使其在1到3之间，并尽可能接近 video_sample_n_frames
-            # 尝试从 stride=3 开始，如果无法满足，则减小 stride
-            for stride in range(3, 0, -1):
-                possible_max_frames = (valid_length + stride - 1) // stride  # 向上取整
-                if possible_max_frames >= self.video_sample_n_frames:
-                    chosen_stride = stride
-                    break
-            else:
-                # 如果 stride=1 也无法满足，则选择 stride=1 并尽可能采样多的帧
-                chosen_stride = 1
+            # # 动态计算 stride，使其在1到3之间，并尽可能接近 video_sample_n_frames
+            # # 尝试从 stride=3 开始，如果无法满足，则减小 stride
+            # for stride in range(3, 0, -1):
+            #     possible_max_frames = (valid_length + stride - 1) // stride  # 向上取整
+            #     if possible_max_frames >= self.video_sample_n_frames:
+            #         chosen_stride = stride
+            #         break
+            # else:
+            #     # 如果 stride=1 也无法满足，则选择 stride=1 并尽可能采样多的帧
+            #     chosen_stride = 1
 
-            self.video_sample_stride = chosen_stride
+            # self.video_sample_stride = chosen_stride
 
-            # 计算实际可以采样的帧数
-            possible_frames = (valid_length + self.video_sample_stride - 1) // self.video_sample_stride
+            # # 计算实际可以采样的帧数
+            # possible_frames = (valid_length + self.video_sample_stride - 1) // self.video_sample_stride
 
-            if possible_frames < self.video_sample_n_frames:
-                raise ValueError(f"在设定的采样参数下，无法采样到足够的帧数。")
+            # if possible_frames < self.video_sample_n_frames:
+            #     raise ValueError(f"在设定的采样参数下，无法采样到足够的帧数。")
 
-            min_sample_n_frames = min(self.video_sample_n_frames, possible_frames)
+            # min_sample_n_frames = min(self.video_sample_n_frames, possible_frames)
 
-            if min_sample_n_frames == 0:
-                raise ValueError("在设定的采样参数下，无法采样到任何帧。")
+            # if min_sample_n_frames == 0:
+            #     raise ValueError("在设定的采样参数下，无法采样到任何帧。")
 
-            # 计算片段的总长度
-            clip_length = (min_sample_n_frames - 1) * self.video_sample_stride + 1
-            if clip_length > valid_length:
-                clip_length = valid_length
-                min_sample_n_frames = (clip_length + self.video_sample_stride - 1) // self.video_sample_stride
+            # # 计算片段的总长度
+            # clip_length = (min_sample_n_frames - 1) * self.video_sample_stride + 1
+            # if clip_length > valid_length:
+            #     clip_length = valid_length
+            #     min_sample_n_frames = (clip_length + self.video_sample_stride - 1) // self.video_sample_stride
 
-            # 随机选择起始索引
-            if valid_length != clip_length:
-                start_idx_lower = start_drop
-                start_idx_upper = end_drop - clip_length
-                if start_idx_upper < start_idx_lower:
-                    start_idx_upper = start_idx_lower  # 防止随机范围出现负值
-                start_idx = random.randint(start_idx_lower, start_idx_upper)
-            else:
-                start_idx = start_drop
+            # # 随机选择起始索引
+            # if valid_length != clip_length:
+            #     start_idx_lower = start_drop
+            #     start_idx_upper = end_drop - clip_length
+            #     if start_idx_upper < start_idx_lower:
+            #         start_idx_upper = start_idx_lower  # 防止随机范围出现负值
+            #     start_idx = random.randint(start_idx_lower, start_idx_upper)
+            # else:
+            #     start_idx = start_drop
 
-            # 生成采样帧的索引
-            batch_index = np.linspace(start_idx, start_idx + clip_length - 1, min_sample_n_frames, dtype=int)
+            # # 生成采样帧的索引
+            # batch_index = np.linspace(start_idx, start_idx + clip_length - 1, min_sample_n_frames, dtype=int)
 
             try:
+                batch_index = np.arange(self.video_sample_n_frames)
                 sample_args = (video_reader, batch_index)
                 pixel_values, masks, ground_truth = func_timeout(VIDEO_READER_TIMEOUT, get_video_reader_batch, args=sample_args)
                 # resized_frames = []
