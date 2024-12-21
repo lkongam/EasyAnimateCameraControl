@@ -348,6 +348,10 @@ class VideoDatasetWithMask(Dataset):
 
             # 计算实际可以采样的帧数
             possible_frames = (valid_length + self.video_sample_stride - 1) // self.video_sample_stride
+
+            if possible_frames < self.video_sample_n_frames:
+                raise ValueError(f"在设定的采样参数下，无法采样到足够的帧数。")
+
             min_sample_n_frames = min(self.video_sample_n_frames, possible_frames)
 
             if min_sample_n_frames == 0:
