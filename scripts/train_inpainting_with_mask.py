@@ -1705,7 +1705,7 @@ def main():
                     def my_mse_loss(output_latents, target):
                         return F.mse_loss(output_latents.float(), target.float(), reduction='mean')
 
-                    output_latents = noise_scheduler.step(noise_pred, timesteps, noisy_latents).prev_sample
+                    output_latents = noise_scheduler.step(noise_pred, timesteps, noisy_latents).pred_original_sample
                     loss = my_mse_loss(output_latents, gt_latents)
 
                     if accelerator.is_main_process:
