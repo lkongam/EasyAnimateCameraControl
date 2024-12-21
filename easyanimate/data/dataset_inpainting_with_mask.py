@@ -482,11 +482,11 @@ if __name__ == "__main__":
     from bucket_sampler import RandomSampler
 
     train_dataset = VideoDatasetWithMask(
-        "datasets/z_mini_datasets_warped_videos_2_3/metadata.json",
-        "datasets/z_mini_datasets_warped_videos_2_3",
-        video_sample_size=256,
+        "datasets/z_mini_datasets_warped_videos_2_3_test/metadata.json",
+        "datasets/z_mini_datasets_warped_videos_2_3_test",
+        video_sample_size=512,
         video_sample_stride=3,
-        video_sample_n_frames=25,
+        video_sample_n_frames=49,
         enable_bucket=False,
         enable_inpaint=True,
     )
