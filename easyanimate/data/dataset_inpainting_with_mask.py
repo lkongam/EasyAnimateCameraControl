@@ -174,11 +174,11 @@ def get_video_reader_batch(video_reader, batch_index):
         cols = np.split(row, 3, axis=2)  # 每行分成 3 列，shape 为 (25, 512, 512, 3)
         videos.extend(cols)  # 将分割后的列添加到 videos 列表中
 
-    pixel_values = videos[3]
+    pixel_values = videos[5]
     masks = videos[4][:, :, :, 0:1]
-    ground_truth = videos[5]
+    mask_pixel_values = videos[2]
 
-    return pixel_values, masks, ground_truth
+    return pixel_values, masks, mask_pixel_values
 
 
 # def resize_frame(frame, target_short_side):
@@ -379,7 +379,7 @@ class VideoDatasetWithMask(Dataset):
             try:
                 batch_index = np.arange(self.video_sample_n_frames)
                 sample_args = (video_reader, batch_index)
-                pixel_values, masks, ground_truth = func_timeout(VIDEO_READER_TIMEOUT, get_video_reader_batch, args=sample_args)
+                pixel_values, masks, mask_pixel_values = func_timeout(VIDEO_READER_TIMEOUT, get_video_reader_batch, args=sample_args)
                 # resized_frames = []
                 # resized_ground_truth = []
                 # for i in range(len(pixel_values)):
@@ -397,22 +397,22 @@ class VideoDatasetWithMask(Dataset):
 
             if not self.enable_bucket:
                 pixel_values = torch.from_numpy(pixel_values).permute(0, 3, 1, 2).contiguous()
+                mask_pixel_values = torch.from_numpy(mask_pixel_values).permute(0, 3, 1, 2).contiguous()
                 pixel_values = pixel_values / 255.0
-                ground_truth = torch.from_numpy(ground_truth).permute(0, 3, 1, 2).contiguous()
-                ground_truth = ground_truth / 255.0
+                mask_pixel_values = mask_pixel_values / 255.0
                 del video_reader
             else:
                 pixel_values = pixel_values
-                ground_truth = ground_truth
+                mask_pixel_values = mask_pixel_values
 
             if not self.enable_bucket:
                 pixel_values = self.video_transforms(pixel_values)
-                ground_truth = self.video_transforms(ground_truth)
+                mask_pixel_values = self.video_transforms(mask_pixel_values)
 
             # Random use no text generation
             if random.random() < self.text_drop_ratio:
                 text = ''
-        return pixel_values, masks, ground_truth, text, data_type
+        return pixel_values, masks, mask_pixel_values, text, data_type
         # else:
         #     image_path, text = data_info['file_path'], data_info['text']
         #     if self.data_root is not None:
@@ -440,9 +440,8 @@ class VideoDatasetWithMask(Dataset):
                 # if data_type_local != data_type:
                 #     raise ValueError("data_type_local != data_type")
 
-                pixel_values, masks, ground_truth, text, data_type = self.get_batch(idx)
+                pixel_values, masks, mask_pixel_values, text, data_type = self.get_batch(idx)
                 sample["pixel_values"] = pixel_values
-                sample["ground_truth"] = ground_truth
                 sample["text"] = text
                 sample["type"] = data_type
                 sample["idx"] = idx
@@ -458,7 +457,7 @@ class VideoDatasetWithMask(Dataset):
             h, w = pixel_values.shape[2], pixel_values.shape[3]  # torch.Size([25, 3, 256, 256])
             masks = process_mask(masks, h, w)
 
-            mask_pixel_values = pixel_values * (1 - masks) + torch.ones_like(pixel_values) * -1 * masks
+            mask_pixel_values = mask_pixel_values * (1 - masks) + torch.ones_like(mask_pixel_values) * -1 * masks
             sample["mask_pixel_values"] = mask_pixel_values
             sample["mask"] = masks
 

@@ -1301,7 +1301,7 @@ def main():
             with accelerator.accumulate(transformer3d):
                 # Convert images to latent space
                 pixel_values = batch["pixel_values"].to(weight_dtype)
-                ground_truth = batch["ground_truth"].to(weight_dtype)
+                # ground_truth = batch["ground_truth"].to(weight_dtype)
 
                 # Increase the batch size when the length of the latent sequence of the current sample is small
                 if args.training_with_video_token_length:
@@ -1473,10 +1473,12 @@ def main():
                         vae_stream_1.wait_stream(torch.cuda.current_stream())
                         with torch.cuda.stream(vae_stream_1):
                             latents = _batch_encode_vae(pixel_values)
-                            gt_latents = _batch_encode_vae(ground_truth)
+                            # gt_latents = _batch_encode_vae(ground_truth)
+                            gt_latents = latents.detach().clone()
                     else:
                         latents = _batch_encode_vae(pixel_values)
-                        gt_latents = _batch_encode_vae(ground_truth)
+                        # gt_latents = _batch_encode_vae(ground_truth)
+                        gt_latents = latents.detach().clone()
                     latents = latents * vae.config.scaling_factor
                     gt_latents = gt_latents * vae.config.scaling_factor
 

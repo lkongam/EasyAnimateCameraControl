@@ -89,7 +89,7 @@ def get_video_to_video_latent_with_mask(input_video_path, video_length, sample_s
                 # 将子帧添加到对应的列表中
                 split_frames[index].append(sub_frame)
 
-    input_video = torch.from_numpy(np.array(split_frames[3]))
+    input_video = torch.from_numpy(np.array(split_frames[2]))
     input_video = input_video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
 
     input_video_mask = torch.from_numpy(np.array(split_frames[4]))
@@ -98,8 +98,8 @@ def get_video_to_video_latent_with_mask(input_video_path, video_length, sample_s
     input_video_mask = input_video_mask * 255
     input_video_mask = input_video_mask.to(input_video.device, input_video.dtype)
 
-    output_video = torch.from_numpy(np.array(split_frames[5]))
-    output_video = output_video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
+    # output_video = torch.from_numpy(np.array(split_frames[5]))
+    # output_video = output_video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
 
     # validation_video_mask = Image.open(validation_video_mask).convert('L').resize((sample_size[1], sample_size[0]))
     # input_video_mask = np.where(np.array(validation_video_mask) < 240, 0, 255)
@@ -108,7 +108,7 @@ def get_video_to_video_latent_with_mask(input_video_path, video_length, sample_s
     # input_video_mask = torch.tile(input_video_mask, [1, 1, input_video.size()[2], 1, 1])
     # input_video_mask = input_video_mask.to(input_video.device, input_video.dtype) # torch.Size([1, 1, 49, 384, 672])
 
-    return input_video, input_video_mask, output_video
+    return input_video, input_video_mask
 
 
 def main(
@@ -150,7 +150,7 @@ def main(
     weight_dtype = torch.bfloat16
     # If you want to generate from text, please set the validation_image_start = None and validation_image_end = None
 
-    denoise_strength = 0.70
+    denoise_strength = 1.0
 
     guidance_scale = 6.0
     seed = 43
@@ -294,7 +294,7 @@ def main(
         video_length = int((video_length - 1) // vae.mini_batch_encoder * vae.mini_batch_encoder) + 1 if video_length != 1 else 1
     else:
         video_length = int(video_length // vae.mini_batch_encoder * vae.mini_batch_encoder) if video_length != 1 else 1
-    input_video, input_video_mask, output_video = get_video_to_video_latent_with_mask(validation_video, video_length=video_length, sample_size=sample_size)
+    input_video, input_video_mask = get_video_to_video_latent_with_mask(validation_video, video_length=video_length, sample_size=sample_size)
 
     with torch.no_grad():
         sample = pipeline(
