@@ -1709,36 +1709,36 @@ def main():
                         else:
                             return mse_loss
 
-                    # output_latents = noise_scheduler.step(noise_pred, timesteps, noisy_latents).pred_original_sample
-                    output_latents = []
-                    batch_size = noise_pred.size(0)
+                    output_latents = noise_scheduler.step(noise_pred, timesteps, noisy_latents).pred_original_sample
+                    # output_latents = []
+                    # batch_size = noise_pred.size(0)
 
-                    for i in range(batch_size):
-                        # 提取单个样本的 noise_pred, timesteps, 和 noisy_latents
-                        single_noise_pred = noise_pred[i].unsqueeze(0)  # 形状: [1, 16, 7, 32, 32]
-                        single_timestep = timesteps[i].unsqueeze(0)  # 形状: [1]
-                        single_noisy_latents = noisy_latents[i].unsqueeze(0)  # 形状: [1, 16, 7, 32, 32]
+                    # for i in range(batch_size):
+                    #     # 提取单个样本的 noise_pred, timesteps, 和 noisy_latents
+                    #     single_noise_pred = noise_pred[i].unsqueeze(0)  # 形状: [1, 16, 7, 32, 32]
+                    #     single_timestep = timesteps[i].unsqueeze(0)  # 形状: [1]
+                    #     single_noisy_latents = noisy_latents[i].unsqueeze(0)  # 形状: [1, 16, 7, 32, 32]
 
-                        # 调用 step 方法
-                        step_output = noise_scheduler.step(single_noise_pred, single_timestep, single_noisy_latents)
+                    #     # 调用 step 方法
+                    #     step_output = noise_scheduler.step(single_noise_pred, single_timestep, single_noisy_latents).pred_original_sample
 
-                        # 收集结果
-                        output_latents.append(step_output.pred_original_sample)
+                    #     # 收集结果
+                    #     output_latents.append(step_output.pred_original_sample)
 
-                    # 将结果堆叠回批次形式
-                    output_latents = torch.cat(output_latents, dim=0)  # 形状: [2, 16, 7, 32, 32]
+                    # # 将结果堆叠回批次形式
+                    # output_latents = torch.cat(output_latents, dim=0)  # 形状: [2, 16, 7, 32, 32]
 
                     loss = my_mse_loss(output_latents, gt_latents)
 
-                    # if accelerator.is_main_process:
-                    #     if global_step % (len(train_dataloader) - 1) == 0 or global_step == 0:
-                    #         with torch.no_grad():
-                    #             video_predict_output = decode_latents(output_latents.to(weight_dtype), vae)
-                    #             video_predict_output = torch.from_numpy(video_predict_output)
-                    #             video_target = decode_latents(gt_latents, vae)
-                    #             video_target = torch.from_numpy(video_target)
-                    #             save_videos_grid(video_predict_output, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_predict_output.gif"))
-                    #             save_videos_grid(video_target, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_target.gif"))
+                    if accelerator.is_main_process:
+                        if global_step % (len(train_dataloader) - 1) == 0 or global_step == 0:
+                            with torch.no_grad():
+                                video_predict_output = decode_latents(output_latents.to(weight_dtype), vae)
+                                video_predict_output = torch.from_numpy(video_predict_output)
+                                video_target = decode_latents(gt_latents, vae)
+                                video_target = torch.from_numpy(video_target)
+                                save_videos_grid(video_predict_output, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_predict_output.gif"))
+                                save_videos_grid(video_target, os.path.join(args.output_dir, f"sample/sample-{global_step}-video_target.gif"))
 
                     if args.motion_sub_loss and noise_pred.size()[2] > 2:
                         gt_sub_noise = noise_pred[:, :, 1:].float() - noise_pred[:, :, :-1].float()

@@ -94,7 +94,7 @@ def get_video_to_video_latent_with_mask(input_video_path, video_length, sample_s
 
     input_video_mask = torch.from_numpy(np.array(split_frames[4]))
     input_video_mask = input_video_mask.permute([3, 0, 1, 2]).unsqueeze(0)
-    input_video_mask = (input_video_mask == 0).all(dim=1, keepdim=True)
+    input_video_mask = (input_video_mask > 128).all(dim=1, keepdim=True)
     input_video_mask = input_video_mask * 255
     input_video_mask = input_video_mask.to(input_video.device, input_video.dtype)
 
@@ -337,20 +337,21 @@ def main(
 if __name__ == '__main__':
 
     # Load pretrained model if need
-    transformer_path = "output_dir_20241221_inpainting_with_mask/checkpoint-1000/transformer"
+    transformer_path = "output_dir_20241221_inpainting_with_mask/checkpoint-1000/transformer/diffusion_pytorch_model.safetensors"
 
     # Other params
     sample_size = [512, 512]
     video_length = 49
     fps = 8
 
-    data_json = "datasets/z_mini_datasets_warped_videos_2_3_test/metadata.json"
+    data_json = "/mnt/chenyang_lei/Datasets/easyanimate_dataset/z_mini_datasets_warped_videos_2_3/metadata.json"
+    data_path = "/mnt/chenyang_lei/Datasets/easyanimate_dataset/z_mini_datasets_warped_videos_2_3"
 
     with open(data_json, "r") as f:
         metadata = json.load(f)
 
     data = metadata[0]
-    validation_video = data['video_file_path']
+    validation_video = os.path.join(data_path, data['video_file_path'])
     prompt = data['text']
     negative_prompt = "Twisted body, limb deformities, text captions, comic, static, ugly, error, messy code, Blurring, mutation, deformation, distortion, dark and solid, comics, text subtitles, line art, quiet, solid."
 
