@@ -1703,7 +1703,11 @@ def main():
                     # loss = custom_mse_loss(noise_pred.float(), target.float())
 
                     def my_mse_loss(output_latents, target):
-                        return F.mse_loss(output_latents.float(), target.float(), reduction='mean')
+                        mse_loss = F.mse_loss(output_latents.float(), target.float(), reduction='mean')
+                        if mse_loss >= 1.0:
+                            return 0.0
+                        else:
+                            return mse_loss
 
                     # output_latents = noise_scheduler.step(noise_pred, timesteps, noisy_latents).pred_original_sample
                     output_latents = []
