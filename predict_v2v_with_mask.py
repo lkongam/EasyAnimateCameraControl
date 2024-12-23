@@ -1,3 +1,4 @@
+import json
 import os
 
 import cv2
@@ -57,41 +58,47 @@ def get_video_to_video_latent_with_mask(input_video_path, video_length, sample_s
     else:
         input_video = input_video_path
 
-    split_frames = [[] for _ in range(5)]
+    split_frames = [[] for _ in range(6)]
     # 拆分每一帧并存储到对应的列表中
 
     for idx, frame in enumerate(input_video):
         height, width, channels = frame.shape
-        num_splits = 5
+        num_rows = 2
+        num_cols = 3
         split_width = 512  # 每个子帧的宽度
         split_height = 512  # 每个子帧的高度
 
-        # 检查帧的尺寸是否符合预期
-        expected_width = split_width * num_splits
-        expected_height = split_height
+        expected_width = split_width * num_cols  # 3 * 512 = 1536
+        expected_height = split_height * num_rows  # 2 * 512 = 1024
         if width != expected_width or height != expected_height:
             print(f"第 {idx} 帧的尺寸 {width}x{height} 不符合预期 {expected_width}x{expected_height}，跳过此帧。")
             continue
 
-        for i in range(num_splits):
-            # 计算每个子帧的起始和结束x坐标
-            start_x = i * split_width
-            end_x = (i + 1) * split_width
-            sub_frame = frame[0:split_height, start_x:end_x]
+        # 逐行逐列拆分帧
+        for row in range(num_rows):
+            for col in range(num_cols):
+                index = row * num_cols + col  # 计算子帧的索引（0到5）
+                start_y = row * split_height
+                end_y = (row + 1) * split_height
+                start_x = col * split_width
+                end_x = (col + 1) * split_width
 
-            # 将子帧添加到对应的列表中
-            split_frames[i].append(sub_frame)
+                # 提取子帧
+                sub_frame = frame[start_y:end_y, start_x:end_x]
 
-    input_video = torch.from_numpy(np.array(split_frames[4]))
+                # 将子帧添加到对应的列表中
+                split_frames[index].append(sub_frame)
+
+    input_video = torch.from_numpy(np.array(split_frames[3]))
     input_video = input_video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
 
-    input_video_mask = torch.from_numpy(np.array(split_frames[3]))
+    input_video_mask = torch.from_numpy(np.array(split_frames[4]))
     input_video_mask = input_video_mask.permute([3, 0, 1, 2]).unsqueeze(0)
     input_video_mask = (input_video_mask == 0).all(dim=1, keepdim=True)
     input_video_mask = input_video_mask * 255
     input_video_mask = input_video_mask.to(input_video.device, input_video.dtype)
 
-    output_video = torch.from_numpy(np.array(split_frames[1]))
+    output_video = torch.from_numpy(np.array(split_frames[5]))
     output_video = output_video.permute([3, 0, 1, 2]).unsqueeze(0) / 255
 
     # validation_video_mask = Image.open(validation_video_mask).convert('L').resize((sample_size[1], sample_size[0]))
@@ -337,10 +344,14 @@ if __name__ == '__main__':
     video_length = 49
     fps = 8
 
-    data_json = ""
+    data_json = "datasets/z_mini_datasets_warped_videos_2_3_test/metadata.json"
 
-    validation_video = "asset/7.mp4"
-    prompt = ""
+    with open(data_json, "r") as f:
+        metadata = json.load(f)
+
+    data = metadata[0]
+    validation_video = data['video_file_path']
+    prompt = data['text']
     negative_prompt = "Twisted body, limb deformities, text captions, comic, static, ugly, error, messy code, Blurring, mutation, deformation, distortion, dark and solid, comics, text subtitles, line art, quiet, solid."
 
     save_path = "samples/easyanimate_v2v_with_mask"
