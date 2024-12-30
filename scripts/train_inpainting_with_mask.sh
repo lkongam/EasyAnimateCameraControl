@@ -1,6 +1,6 @@
 export MODEL_NAME="models/Diffusion_Transformer/EasyAnimateV5-7b-zh-InP"
-export DATASET_NAME="/mnt/chenyang_lei/Datasets/easyanimate_dataset/z_mini_datasets_warped_videos_2_3_test"
-export DATASET_META_NAME="/mnt/chenyang_lei/Datasets/easyanimate_dataset/z_mini_datasets_warped_videos_2_3_test/metadata.json"
+export DATASET_NAME="/mnt/chenyang_lei/Datasets/easyanimate_dataset/z_mini_datasets_warped_videos_2_3"
+export DATASET_META_NAME="/mnt/chenyang_lei/Datasets/easyanimate_dataset/z_mini_datasets_warped_videos_2_3/metadata.json"
 export NCCL_IB_DISABLE=1
 export NCCL_P2P_DISABLE=1
 export CUDA_VISIBLE_DEVICES=0,1,2,3
@@ -18,19 +18,20 @@ accelerate launch \
   --train_data_dir=$DATASET_NAME \
   --train_data_meta=$DATASET_META_NAME \
   --config_path "config/easyanimate_video_v5_magvit_multi_text_encoder.yaml" \
+  --checkpoints_total_limit=1 \
   --video_sample_size=512 \
   --video_sample_stride=3 \
   --video_sample_n_frames=49 \
-  --train_batch_size=2 \
-  --gradient_accumulation_steps=1 \
+  --train_batch_size=1 \
+  --gradient_accumulation_steps=2 \
   --dataloader_num_workers=8 \
   --num_train_epochs=100 \
-  --checkpointing_steps=1000 \
+  --checkpointing_steps=2150 \
   --learning_rate=2e-05 \
   --lr_scheduler="constant_with_warmup" \
   --lr_warmup_steps=100 \
   --seed=42 \
-  --output_dir="output_dir_20241221_inpainting_with_mask" \
+  --output_dir="output_dir_20241224_inpainting_with_mask" \
   --gradient_checkpointing \
   --mixed_precision="bf16" \
   --adam_weight_decay=5e-3 \

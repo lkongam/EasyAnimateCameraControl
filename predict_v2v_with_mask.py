@@ -116,6 +116,7 @@ def main(
     sample_size,
     video_length,
     fps,
+    denoise_strength,
     validation_video,
     prompt,
     negative_prompt,
@@ -149,8 +150,6 @@ def main(
     # ome graphics cards, such as v100, 2080ti, do not support torch.bfloat16
     weight_dtype = torch.bfloat16
     # If you want to generate from text, please set the validation_image_start = None and validation_image_end = None
-
-    denoise_strength = 1.0
 
     guidance_scale = 6.0
     seed = 43
@@ -337,12 +336,14 @@ def main(
 if __name__ == '__main__':
 
     # Load pretrained model if need
-    transformer_path = "output_dir_20241221_inpainting_with_mask/checkpoint-1000/transformer/diffusion_pytorch_model.safetensors"
+    transformer_path = "output_dir_20241222_inpainting_with_mask/checkpoint-50/transformer/diffusion_pytorch_model.safetensors"
 
     # Other params
     sample_size = [512, 512]
     video_length = 49
     fps = 8
+
+    denoise_strength = 1.0
 
     data_json = "/mnt/chenyang_lei/Datasets/easyanimate_dataset/z_mini_datasets_warped_videos_2_3/metadata.json"
     data_path = "/mnt/chenyang_lei/Datasets/easyanimate_dataset/z_mini_datasets_warped_videos_2_3"
@@ -350,7 +351,7 @@ if __name__ == '__main__':
     with open(data_json, "r") as f:
         metadata = json.load(f)
 
-    data = metadata[0]
+    data = metadata[4]
     validation_video = os.path.join(data_path, data['video_file_path'])
     prompt = data['text']
     negative_prompt = "Twisted body, limb deformities, text captions, comic, static, ugly, error, messy code, Blurring, mutation, deformation, distortion, dark and solid, comics, text subtitles, line art, quiet, solid."
@@ -362,6 +363,7 @@ if __name__ == '__main__':
         sample_size,
         video_length,
         fps,
+        denoise_strength,
         validation_video,
         prompt,
         negative_prompt,
