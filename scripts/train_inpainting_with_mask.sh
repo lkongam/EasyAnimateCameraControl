@@ -18,20 +18,19 @@ accelerate launch \
   --train_data_dir=$DATASET_NAME \
   --train_data_meta=$DATASET_META_NAME \
   --config_path "config/easyanimate_video_v5_magvit_multi_text_encoder.yaml" \
-  --checkpoints_total_limit=1 \
   --video_sample_size=512 \
-  --video_sample_stride=3 \
+  --video_sample_stride=1 \
   --video_sample_n_frames=49 \
   --train_batch_size=1 \
   --gradient_accumulation_steps=2 \
   --dataloader_num_workers=8 \
-  --num_train_epochs=100 \
-  --checkpointing_steps=2150 \
+  --num_train_epochs=3 \
+  --checkpointing_steps=5356 \
   --learning_rate=2e-05 \
   --lr_scheduler="constant_with_warmup" \
   --lr_warmup_steps=100 \
   --seed=42 \
-  --output_dir="output_dir_20241224_inpainting_with_mask" \
+  --output_dir="output_dir_20250101_inpainting_with_mask_all_realestate" \
   --gradient_checkpointing \
   --mixed_precision="bf16" \
   --adam_weight_decay=5e-3 \
@@ -42,4 +41,5 @@ accelerate launch \
   --uniform_sampling \
   --use_deepspeed \
   --train_mode="inpaint" \
-  --trainable_modules "."
+  --trainable_modules "." \
+  --resume_from_checkpoint="latest"
