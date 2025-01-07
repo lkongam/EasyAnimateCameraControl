@@ -1,35 +1,17 @@
 import json
-import os
+from datetime import timedelta
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2"
 
 import cv2
 import numpy as np
 import torch
-from diffusers import (
-    DDIMScheduler,
-    DPMSolverMultistepScheduler,
-    EulerAncestralDiscreteScheduler,
-    EulerDiscreteScheduler,
-    PNDMScheduler,
-)
+import torch.multiprocessing as mp
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import DataLoader, Dataset
 from omegaconf import OmegaConf
 from PIL import Image
-from transformers import (
-    BertModel,
-    BertTokenizer,
-    CLIPImageProcessor,
-    CLIPVisionModelWithProjection,
-    T5EncoderModel,
-    T5Tokenizer,
-)
 
-from easyanimate.models import name_to_autoencoder_magvit, name_to_transformer3d
-from easyanimate.pipeline.pipeline_easyanimate_inpaint import EasyAnimateInpaintPipeline
-from easyanimate.pipeline.pipeline_easyanimate_multi_text_encoder_inpaint import (
-    EasyAnimatePipeline_Multi_Text_Encoder_Inpaint,
-)
-from easyanimate.utils.fp8_optimization import convert_weight_dtype_wrapper
-from easyanimate.utils.lora_utils import merge_lora, unmerge_lora
-from easyanimate.utils.utils import get_video_to_video_latent, save_videos_grid
 
 
 def get_video_to_video_latent_with_mask(input_video_path, video_length, sample_size):
@@ -110,15 +92,16 @@ def get_video_to_video_latent_with_mask(input_video_path, video_length, sample_s
 
     return input_video, input_video_mask
 
-
-def main(
+def sampling_worker(
+    rank,
+    world_size,
     transformer_path,
     sample_size,
     video_length,
     fps,
     denoise_strength,
-    validation_video,
-    prompt,
+    test_dataset,
+    data_path,
     negative_prompt,
     save_path,
 ):
@@ -130,6 +113,39 @@ def main(
     #
     # sequential_cpu_offload means that each layer of the model will be moved to the CPU after use,
     # resulting in slower speeds but saving a large amount of GPU memory.
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(rank)
+    from diffusers import (
+        DDIMScheduler,
+        DPMSolverMultistepScheduler,
+        EulerAncestralDiscreteScheduler,
+        EulerDiscreteScheduler,
+        PNDMScheduler,
+    )
+    from transformers import (
+        BertModel,
+        BertTokenizer,
+        CLIPImageProcessor,
+        CLIPVisionModelWithProjection,
+        T5EncoderModel,
+        T5Tokenizer,
+    )
+
+    from easyanimate.models import name_to_autoencoder_magvit, name_to_transformer3d
+    from easyanimate.pipeline.pipeline_easyanimate_inpaint import EasyAnimateInpaintPipeline
+    from easyanimate.pipeline.pipeline_easyanimate_multi_text_encoder_inpaint import (
+        EasyAnimatePipeline_Multi_Text_Encoder_Inpaint,
+    )
+    from easyanimate.utils.fp8_optimization import convert_weight_dtype_wrapper
+    from easyanimate.utils.lora_utils import merge_lora, unmerge_lora
+    from easyanimate.utils.utils import get_video_to_video_latent, save_videos_grid
+    print(os.environ["CUDA_VISIBLE_DEVICES"])
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '5678'
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    device_str = f"cuda:0"
+    device = torch.device(f"cuda:0")
+    print(device)
     GPU_memory_mode = "model_cpu_offload"
 
     # Config and model path
@@ -171,7 +187,7 @@ def main(
         transformer_additional_kwargs=transformer_additional_kwargs,
         torch_dtype=torch.float8_e4m3fn if GPU_memory_mode == "model_cpu_offload_and_qfloat8" else weight_dtype,
         low_cpu_mem_usage=True,
-    )
+    ).to(device)
 
     if transformer_path is not None:
         print(f"From checkpoint: {transformer_path}")
@@ -201,7 +217,7 @@ def main(
 
     # Get Vae
     Choosen_AutoencoderKL = name_to_autoencoder_magvit[config['vae_kwargs'].get('vae_type', 'AutoencoderKL')]
-    vae = Choosen_AutoencoderKL.from_pretrained(model_name, subfolder="vae", vae_additional_kwargs=OmegaConf.to_container(config['vae_kwargs'])).to(weight_dtype)
+    vae = Choosen_AutoencoderKL.from_pretrained(model_name, subfolder="vae", vae_additional_kwargs=OmegaConf.to_container(config['vae_kwargs'])).to(device, dtype = weight_dtype)
     if config['vae_kwargs'].get('vae_type', 'AutoencoderKL') == 'AutoencoderKLMagvit' and weight_dtype == torch.float16:
         vae.upcast_vae = True
 
@@ -226,15 +242,15 @@ def main(
         tokenizer_2 = None
 
     if config['text_encoder_kwargs'].get('enable_multi_text_encoder', False):
-        text_encoder = BertModel.from_pretrained(model_name, subfolder="text_encoder", torch_dtype=weight_dtype)
-        text_encoder_2 = T5EncoderModel.from_pretrained(model_name, subfolder="text_encoder_2", torch_dtype=weight_dtype)
+        text_encoder = BertModel.from_pretrained(model_name, subfolder="text_encoder", torch_dtype=weight_dtype).to(device)
+        text_encoder_2 = T5EncoderModel.from_pretrained(model_name, subfolder="text_encoder_2", torch_dtype=weight_dtype).to(device)
     else:
-        text_encoder = T5EncoderModel.from_pretrained(model_name, subfolder="text_encoder", torch_dtype=weight_dtype)
+        text_encoder = T5EncoderModel.from_pretrained(model_name, subfolder="text_encoder", torch_dtype=weight_dtype).to(device)
         text_encoder_2 = None
 
     if transformer.config.in_channels != vae.config.latent_channels and config['transformer_additional_kwargs'].get('enable_clip_in_inpaint', True):
-        clip_image_encoder = CLIPVisionModelWithProjection.from_pretrained(model_name, subfolder="image_encoder").to("cuda", weight_dtype)
-        clip_image_processor = CLIPImageProcessor.from_pretrained(model_name, subfolder="image_encoder")
+        clip_image_encoder = CLIPVisionModelWithProjection.from_pretrained(model_name, subfolder="image_encoder").to(device, weight_dtype)
+        clip_image_processor = CLIPImageProcessor.from_pretrained(model_name, subfolder="image_encoder").to(device)
     else:
         clip_image_encoder = None
         clip_image_processor = None
@@ -284,59 +300,117 @@ def main(
     else:
         pipeline.enable_model_cpu_offload()
 
-    generator = torch.Generator(device="cuda").manual_seed(seed)
 
     if lora_path is not None:
-        pipeline = merge_lora(pipeline, lora_path, lora_weight, "cuda")
+        pipeline = merge_lora(pipeline, lora_path, lora_weight, device_str)
+    
 
     if vae.cache_mag_vae:
         video_length = int((video_length - 1) // vae.mini_batch_encoder * vae.mini_batch_encoder) + 1 if video_length != 1 else 1
     else:
         video_length = int(video_length // vae.mini_batch_encoder * vae.mini_batch_encoder) if video_length != 1 else 1
-    input_video, input_video_mask = get_video_to_video_latent_with_mask(validation_video, video_length=video_length, sample_size=sample_size)
 
-    with torch.no_grad():
-        sample = pipeline(
-            prompt,
-            video_length=video_length,
-            negative_prompt=negative_prompt,
-            height=sample_size[0],
-            width=sample_size[1],
-            generator=generator,
-            guidance_scale=guidance_scale,
-            num_inference_steps=num_inference_steps,
-            video=input_video,
-            mask_video=input_video_mask,
-            clip_image=None,
-            strength=denoise_strength,
-        ).videos
+    generator = torch.Generator(device=device).manual_seed(seed)
+    pipeline.to(device)
+    print(pipeline._execution_device)
 
-    if lora_path is not None:
-        pipeline = unmerge_lora(pipeline, lora_path, lora_weight, "cuda")
+    print(f"Rank {rank}: Using device {device}.")
 
-    if not os.path.exists(save_path):
-        os.makedirs(save_path, exist_ok=True)
+    # Split dataset into chunks
+    chunk_size = len(test_dataset) // world_size
+    start_idx = rank * chunk_size
+    end_idx = len(test_dataset) if rank == world_size - 1 else (rank + 1) * chunk_size
+    dataset_chunk = test_dataset[start_idx:end_idx]
 
-    index = len([path for path in os.listdir(save_path)]) + 1
-    prefix = str(index).zfill(8)
+    for idx, metadata in enumerate(dataset_chunk):
+        if os.path.exists(os.path.join(save_path, metadata['video_file_path'])):
+            continue
+        video = os.path.join(data_path, metadata['video_file_path'])
+        prompt = metadata['text']
+        input_video, input_video_mask = get_video_to_video_latent_with_mask(video, video_length=video_length, sample_size=sample_size)
+        input_video.to(device)
+        input_video_mask.to(device)
 
-    if video_length == 1:
-        save_sample_path = os.path.join(save_path, prefix + f".png")
+        with torch.no_grad():
+            sample = pipeline(
+                prompt,
+                video_length=video_length,
+                negative_prompt=negative_prompt,
+                height=sample_size[0],
+                width=sample_size[1],
+                generator=generator,
+                guidance_scale=guidance_scale,
+                num_inference_steps=num_inference_steps,
+                video=input_video,
+                mask_video=input_video_mask,
+                clip_image=None,
+                strength=denoise_strength,
+            ).videos
 
-        image = sample[0, :, 0]
-        image = image.transpose(0, 1).transpose(1, 2)
-        image = (image * 255).numpy().astype(np.uint8)
-        image = Image.fromarray(image)
-        image.save(save_sample_path)
-    else:
-        video_path = os.path.join(save_path, prefix + ".mp4")
-        save_videos_grid(sample, video_path, fps=fps)
+        if lora_path is not None:
+            pipeline = unmerge_lora(pipeline, lora_path, lora_weight, device_str)
 
+        if not os.path.exists(save_path):
+            os.makedirs(save_path, exist_ok=True)
+
+        if video_length == 1:
+            save_sample_path = os.path.join(save_path, video)
+
+            image = sample[0, :, 0]
+            image = image.transpose(0, 1).transpose(1, 2)
+            image = (image * 255).numpy().astype(np.uint8)
+            image = Image.fromarray(image)
+            image.save(save_sample_path)
+        else:
+            video_path = os.path.join(save_path, metadata['video_file_path']) 
+            print(video_path)
+            save_videos_grid(sample, video_path, fps=fps)
+    
+    torch.cuda.empty_cache()
+
+def main(
+    transformer_path,
+    sample_size,
+    video_length,
+    fps,
+    denoise_strength,
+    test_dataset,
+    data_path,
+    negative_prompt,
+    save_path
+):
+    num_gpus = 8
+    mp.set_start_method("spawn", force=True)
+    mp.spawn(
+        sampling_worker,
+        args = (
+            num_gpus,
+            transformer_path,
+            sample_size,
+            video_length,
+            fps,
+            denoise_strength,  
+            test_dataset,
+            data_path,
+            negative_prompt,
+            save_path,
+        ),
+        nprocs = num_gpus,
+        join = True
+    )
+    
 
 if __name__ == '__main__':
 
     # Load pretrained model if need
-    transformer_path = "output_dir_20241230_inpainting_with_mask_10000_realestate/checkpoint-1046/transformer/diffusion_pytorch_model.safetensors"
+    from argparse import ArgumentParser
+    parser = ArgumentParser()
+    parser.add_argument('--ckp_path', type = str)
+    parser.add_argument('--save_path', type = str)
+    args = parser.parse_args()
+
+    # transformer_path = "output_dir_20241230_inpainting_with_mask_10000_realestate/checkpoint-1046/transformer/diffusion_pytorch_model.safetensors"
+    transformer_path = args.ckp_path
 
     # Other params
     sample_size = [512, 512]
@@ -345,27 +419,25 @@ if __name__ == '__main__':
 
     denoise_strength = 1.0
 
-    data_json = "/mnt/chenyang_lei/Datasets/easyanimate_dataset/EvaluationSet/RealEstate10K/metadata.json"
-    data_path = "/mnt/chenyang_lei/Datasets/easyanimate_dataset/EvaluationSet/RealEstate10K"
+    data_json = "/home/lingcheng/RealEstate10KAfterProcess/metadata.json"
+    data_path = "/home/lingcheng/RealEstate10KAfterProcess"
 
     with open(data_json, "r") as f:
         metadata = json.load(f)
-
-    data = metadata[0]
-    validation_video = os.path.join(data_path, data['video_file_path'])
-    prompt = data['text']
     negative_prompt = "Twisted body, limb deformities, text captions, comic, static, ugly, error, messy code, Blurring, mutation, deformation, distortion, dark and solid, comics, text subtitles, line art, quiet, solid."
 
-    save_path = "samples/easyanimate_v2v_with_mask"
+    # save_path = "/home/lingcheng/EasyAnimateCameraControl/outputs/easyanimate_v2v_with_mask"
+    save_path = args.save_path
 
+    test_dataset = metadata
     main(
         transformer_path,
         sample_size,
         video_length,
         fps,
         denoise_strength,
-        validation_video,
-        prompt,
+        test_dataset,
+        data_path,
         negative_prompt,
         save_path,
     )

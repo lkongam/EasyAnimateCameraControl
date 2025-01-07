@@ -345,8 +345,8 @@ if __name__ == '__main__':
 
     denoise_strength = 1.0
 
-    data_json = "/mnt/chenyang_lei/Datasets/easyanimate_dataset/EvaluationSet/RealEstate10K/metadata.json"
-    data_path = "/mnt/chenyang_lei/Datasets/easyanimate_dataset/EvaluationSet/RealEstate10K"
+    data_json = "/home/lingcheng/EasyAnimateCameraControl/datasets/RealEstate10KAfterProcess/metadata.json"
+    data_path = "/home/lingcheng/EasyAnimateCameraControl/datasets/RealEstate10KAfterProcess"
 
     with open(data_json, "r") as f:
         metadata = json.load(f)
